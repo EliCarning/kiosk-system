@@ -1,88 +1,65 @@
 using System.Net;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using System.Net.Http.Json;
 
 namespace KioskAgent;
 
-public class Worker(ILogger<Worker> logger) : BackgroundService
+public class Worker : BackgroundService
 {
-    private const string HeartbeatUrl = "http://localhost:5226/api/heartbeat";
-    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
+    private readonly ILogger<Worker> _logger;
+    private readonly HttpClient _httpClient;
 
-    private readonly HttpClient _httpClient = new()
+    public Worker(ILogger<Worker> logger)
     {
-        Timeout = TimeSpan.FromSeconds(10)
-    };
+        _logger = logger;
+        _httpClient = new HttpClient();
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var machineName = Environment.MachineName;
+        _logger.LogInformation("Agent started");
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            await SendHeartbeatAsync(machineName, stoppingToken);
             try
             {
-                await Task.Delay(Interval, stoppingToken);
-            }
-            catch (TaskCanceledException)
-            {
-                break;
-            }
-        }
-    }
+                var ip = GetLocalIpAddress();
 
-    public override void Dispose()
-    {
-        _httpClient.Dispose();
-        base.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    private async Task SendHeartbeatAsync(string machineName, CancellationToken stoppingToken)
-    {
-        try
-        {
-            var payload = new
-            {
-                machineName,
-                ipAddress = GetLocalIPv4Address()
-            };
-
-            var response = await _httpClient.PostAsJsonAsync(HeartbeatUrl, payload, stoppingToken);
-
-            if (response.IsSuccessStatusCode)
-            {
-                logger.LogInformation("Heartbeat sent for {MachineName} at {Time}", machineName, DateTimeOffset.Now);
-            }
-            else
-            {
-                logger.LogWarning("Heartbeat failed for {MachineName}: {StatusCode}", machineName, response.StatusCode);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error sending heartbeat for {MachineName}", machineName);
-        }
-    }
-
-    private static string GetLocalIPv4Address()
-    {
-        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (ni.OperationalStatus != OperationalStatus.Up) continue;
-            if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
-
-            foreach (var addr in ni.GetIPProperties().UnicastAddresses)
-            {
-                if (addr.Address.AddressFamily == AddressFamily.InterNetwork)
+                var payload = new
                 {
-                    return addr.Address.ToString();
+                    machineName = Environment.MachineName,
+                    ipAddress = ip
+                };
+
+                var response = await _httpClient.PostAsJsonAsync(
+                    "http://localhost:5226/api/heartbeat",
+                    payload,
+                    stoppingToken
+                );
+
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Heartbeat sent successfully");
+                }
+                else
+                {
+                    _logger.LogWarning("Heartbeat failed: {Status}", response.StatusCode);
                 }
             }
-        }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending heartbeat");
+            }
 
-        return IPAddress.Loopback.ToString();
+            await Task.Delay(30000, stoppingToken);
+        }
+    }
+
+    private string GetLocalIpAddress()
+    {
+        var host = Dns.GetHostEntry(Dns.GetHostName());
+        var ip = host.AddressList.FirstOrDefault(ip =>
+            ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+
+        return ip?.ToString() ?? "unknown";
     }
 }
