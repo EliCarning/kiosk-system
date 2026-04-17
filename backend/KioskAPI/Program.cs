@@ -7,12 +7,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSingleton<IMachineService, MachineService>();
 
-
 var app = builder.Build();
 
 app.UseSwagger();
 app.UseSwaggerUI();
-
 
 app.MapGet("/api/machines", (IMachineService service) =>
 {
