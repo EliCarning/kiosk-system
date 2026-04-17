@@ -1,0 +1,17 @@
+# .NET
+bin/
+obj/
+
+# VS Code
+.vscode/
+
+# Mac
+.DS_Store
+
+# logs
+*.log
+
+# frontend
+node_modules/
+dist/
+build/
