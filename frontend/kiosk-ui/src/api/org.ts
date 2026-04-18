@@ -9,14 +9,15 @@ import {
   Site,
   Department,
 } from "../types/org";
-import {
-  MOCK_ORG,
-  MockKioskSeed,
-  UNASSIGNED_DEPT_ID,
-  UNASSIGNED_SITE_ID,
-} from "../data/mockOrg";
 
 const HISTORY_POINTS = 16;
+
+const DEFAULT_SITE_ID = "site-default";
+const DEFAULT_SITE_NAME = "All Kiosks";
+const DEFAULT_SITE_LOCATION = "Deployed machines";
+const DEFAULT_DEPT_ID = "dept-default";
+const DEFAULT_DEPT_NAME = "Machines";
+const ORG_NAME = "Kiosk Operations";
 
 const hashString = (s: string): number => {
   let h = 0;
@@ -26,7 +27,11 @@ const hashString = (s: string): number => {
   return Math.abs(h);
 };
 
-const deriveCheckState = (seed: string, offset: number, online: boolean): CheckState => {
+const deriveCheckState = (
+  seed: string,
+  offset: number,
+  online: boolean
+): CheckState => {
   if (!online) return "error";
   const h = hashString(seed + ":" + offset);
   const bucket = h % 10;
@@ -70,42 +75,38 @@ const buildHistory = (
   lastSeen: string | null
 ): KioskHistoryPoint[] => {
   const anchor = lastSeen ? new Date(lastSeen).getTime() : Date.now();
+  const base = isNaN(anchor) ? Date.now() : anchor;
   const points: KioskHistoryPoint[] = [];
   for (let i = 0; i < HISTORY_POINTS; i++) {
     const state = deriveCheckState(machineName, 100 + i, online);
     points.push({
-      timestamp: new Date(anchor - (HISTORY_POINTS - i) * 5 * 60 * 1000).toISOString(),
+      timestamp: new Date(
+        base - (HISTORY_POINTS - i) * 5 * 60 * 1000
+      ).toISOString(),
       state,
     });
   }
   return points;
 };
 
-const buildKiosk = (
-  seed: MockKioskSeed,
-  siteId: string,
-  departmentId: string,
-  machine: Machine | undefined
-): Kiosk => {
-  const online = machine?.status?.toLowerCase() === "online";
-  const status = machine?.status ?? "Offline";
-  const ipAddress = machine?.ipAddress ?? "—";
-  const lastSeen = machine?.lastSeen ?? null;
-  const checks = buildChecks(seed.machineName, online);
-  const history = buildHistory(seed.machineName, online, lastSeen);
-  const h = hashString(seed.machineName);
+const machineToKiosk = (m: Machine): Kiosk => {
+  const status = m.status ?? "Offline";
+  const online = typeof status === "string" && status.toLowerCase() === "online";
+  const ipAddress = m.ipAddress && m.ipAddress.length > 0 ? m.ipAddress : "—";
+  const lastSeen = m.lastSeen ?? null;
+  const h = hashString(m.machineName);
 
   return {
-    id: seed.id,
-    machineName: seed.machineName,
-    displayName: seed.displayName,
+    id: `k-${m.machineName}`,
+    machineName: m.machineName,
+    displayName: m.machineName,
     ipAddress,
     status,
     lastSeen,
-    siteId,
-    departmentId,
-    checks,
-    history,
+    siteId: DEFAULT_SITE_ID,
+    departmentId: DEFAULT_DEPT_ID,
+    checks: buildChecks(m.machineName, online),
+    history: buildHistory(m.machineName, online, lastSeen),
     browser: {
       name: "Chromium Kiosk",
       version: `118.0.${1000 + (h % 900)}.${h % 200}`,
@@ -129,59 +130,21 @@ export async function fetchOrganization(): Promise<Organization> {
 }
 
 export function composeOrganization(machines: Machine[]): Organization {
-  const byName = new Map<string, Machine>();
-  for (const m of machines) byName.set(m.machineName, m);
+  const kiosks: Kiosk[] = machines.map(machineToKiosk);
 
-  const claimed = new Set<string>();
-  const sites: Site[] = MOCK_ORG.sites.map((mockSite) => {
-    const departments: Department[] = mockSite.departments.map((mockDept) => {
-      const kiosks = mockDept.kiosks.map((seed) => {
-        claimed.add(seed.machineName);
-        return buildKiosk(seed, mockSite.id, mockDept.id, byName.get(seed.machineName));
-      });
-      return {
-        id: mockDept.id,
-        name: mockDept.name,
-        siteId: mockSite.id,
-        kiosks,
-      };
-    });
-    return {
-      id: mockSite.id,
-      name: mockSite.name,
-      location: mockSite.location,
-      departments,
-    };
-  });
+  const department: Department = {
+    id: DEFAULT_DEPT_ID,
+    name: DEFAULT_DEPT_NAME,
+    siteId: DEFAULT_SITE_ID,
+    kiosks,
+  };
 
-  const unassigned = machines.filter((m) => !claimed.has(m.machineName));
-  if (unassigned.length > 0) {
-    const kiosks = unassigned.map((m) =>
-      buildKiosk(
-        {
-          id: `k-unassigned-${m.machineName}`,
-          machineName: m.machineName,
-          displayName: m.machineName,
-        },
-        UNASSIGNED_SITE_ID,
-        UNASSIGNED_DEPT_ID,
-        m
-      )
-    );
-    sites.push({
-      id: UNASSIGNED_SITE_ID,
-      name: "Unassigned",
-      location: "Not mapped to a site",
-      departments: [
-        {
-          id: UNASSIGNED_DEPT_ID,
-          name: "Unassigned",
-          siteId: UNASSIGNED_SITE_ID,
-          kiosks,
-        },
-      ],
-    });
-  }
+  const site: Site = {
+    id: DEFAULT_SITE_ID,
+    name: DEFAULT_SITE_NAME,
+    location: DEFAULT_SITE_LOCATION,
+    departments: [department],
+  };
 
-  return { name: MOCK_ORG.name, sites };
+  return { name: ORG_NAME, sites: [site] };
 }
