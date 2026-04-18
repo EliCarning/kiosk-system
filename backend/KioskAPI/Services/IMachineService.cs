@@ -4,6 +4,6 @@ namespace KioskAPI.Services;
 
 public interface IMachineService
 {
-    IEnumerable<MachineStatus> GetAll();
-    MachineStatus Upsert(HeartbeatRequest request);
+    Task<IEnumerable<MachineStatus>> GetAllAsync(CancellationToken ct = default);
+    Task<MachineStatus> UpsertAsync(HeartbeatRequest request, CancellationToken ct = default);
 }
