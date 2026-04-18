@@ -268,7 +268,7 @@ public class Worker : BackgroundService
         public string MachineName { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
         public string? Payload { get; set; }
-        public int Status { get; set; }
+        public string Status { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
     }

@@ -5,7 +5,9 @@ import CheckBadge from "./CheckBadge";
 import CommandHistory from "./CommandHistory";
 import { createCommand } from "../../api/actions";
 import { fetchCommands } from "../../api/commands";
+import { fetchMachineLogs } from "../../api/logs";
 import { CommandType, KioskCommand } from "../../types/command";
+import { MachineLog } from "../../types/log";
 
 interface KioskDetailsPanelProps {
   kiosk: Kiosk;
@@ -33,6 +35,8 @@ type ActionState =
   | { kind: "error"; type: CommandType; message: string };
 
 const COMMANDS_POLL_MS = 5000;
+const LOGS_POLL_MS = 5000;
+const LOGS_PREVIEW_COUNT = 15;
 
 const formatDate = (iso: string | null): string => {
   if (!iso) return "—";
@@ -41,11 +45,36 @@ const formatDate = (iso: string | null): string => {
   return d.toLocaleString();
 };
 
+const formatLogTime = (iso: string): string => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
+const levelToVariant = (level: string): string => {
+  const n = level.toLowerCase();
+  if (n === "error") return "error";
+  if (n === "warning" || n === "warn") return "warning";
+  if (n === "info") return "info";
+  return "neutral";
+};
+
 const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose }) => {
   const [actionState, setActionState] = useState<ActionState>({ kind: "idle" });
+
   const [commands, setCommands] = useState<KioskCommand[]>([]);
   const [commandsLoading, setCommandsLoading] = useState<boolean>(true);
   const [commandsError, setCommandsError] = useState<string | null>(null);
+
+  const [logs, setLogs] = useState<MachineLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState<boolean>(true);
+  const [logsError, setLogsError] = useState<string | null>(null);
 
   const loadCommands = useCallback(async () => {
     setCommandsError(null);
@@ -61,6 +90,18 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
     }
   }, [kiosk.machineName]);
 
+  const loadLogs = useCallback(async () => {
+    setLogsError(null);
+    try {
+      const data = await fetchMachineLogs(kiosk.machineName);
+      setLogs(data);
+    } catch (err) {
+      setLogsError(err instanceof Error ? err.message : "Unable to load logs");
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [kiosk.machineName]);
+
   useEffect(() => {
     setCommandsLoading(true);
     setCommands([]);
@@ -68,6 +109,14 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
     const id = window.setInterval(loadCommands, COMMANDS_POLL_MS);
     return () => window.clearInterval(id);
   }, [loadCommands]);
+
+  useEffect(() => {
+    setLogsLoading(true);
+    setLogs([]);
+    loadLogs();
+    const id = window.setInterval(loadLogs, LOGS_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [loadLogs]);
 
   const handleAction = async (type: CommandType, label: string) => {
     setActionState({ kind: "sending", type });
@@ -107,6 +156,48 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
         ? `Sending ${actionState.type}...`
         : actionState.message;
     return <div className={cls}>{text}</div>;
+  };
+
+  const renderLogs = () => {
+    if (logsLoading && logs.length === 0) {
+      return <div className="cmd-history__hint">Loading logs...</div>;
+    }
+    if (logsError) {
+      return (
+        <div className="cmd-history__hint cmd-history__hint--error">
+          <span>{logsError}</span>
+          <button className="btn btn--ghost" onClick={loadLogs}>
+            Retry
+          </button>
+        </div>
+      );
+    }
+    if (logs.length === 0) {
+      return <div className="cmd-history__hint">No logs for this machine.</div>;
+    }
+    const preview = logs.slice(0, LOGS_PREVIEW_COUNT);
+    return (
+      <ul className="cmd-history">
+        {preview.map((log, idx) => (
+          <li
+            key={`${log.timestamp}-${idx}`}
+            className="cmd-history__row"
+          >
+            <div className="cmd-history__main">
+              <span
+                className={`log-level log-level--${levelToVariant(log.level)}`}
+              >
+                {log.level}
+              </span>
+              <span className="cmd-history__type">{log.message}</span>
+            </div>
+            <div className="cmd-history__meta">
+              <span>{formatLogTime(log.timestamp)}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
   };
 
   const isSending = actionState.kind === "sending";
@@ -248,6 +339,11 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
           error={commandsError}
           onRetry={loadCommands}
         />
+      </section>
+
+      <section className="details-panel__section">
+        <div className="details-panel__section-title">Logs</div>
+        {renderLogs()}
       </section>
     </aside>
   );
