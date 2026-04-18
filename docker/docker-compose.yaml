@@ -1,4 +1,16 @@
 services:
+  postgres:
+    image: postgres:15
+    container_name: kiosk-db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: kiosk
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   backend:
     build:
       context: ../backend/KioskAPI
@@ -9,6 +21,9 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:5226
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=kiosk;Username=admin;Password=admin
+    depends_on:
+      - postgres
 
   agent:
     build:
@@ -29,3 +44,6 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+
+volumes:
+  postgres_data:

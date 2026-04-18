@@ -6,15 +6,16 @@ namespace KioskAPI.Services;
 
 public class LogService : ILogService
 {
-    private readonly KioskDbContext _db;
+    private readonly AppDbContext _db;
 
-    public LogService(KioskDbContext db)
+    public LogService(AppDbContext db)
     {
         _db = db;
     }
 
     public async Task<Log> AddAsync(Log log, CancellationToken ct = default)
     {
+        log.Id = Guid.NewGuid();
         if (log.Timestamp == default)
         {
             log.Timestamp = DateTime.UtcNow;

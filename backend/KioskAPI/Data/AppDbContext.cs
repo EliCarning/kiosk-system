@@ -3,9 +3,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KioskAPI.Data;
 
-public class KioskDbContext : DbContext
+public class AppDbContext : DbContext
 {
-    public KioskDbContext(DbContextOptions<KioskDbContext> options) : base(options)
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
     {
     }
 
@@ -57,8 +57,7 @@ public class KioskDbContext : DbContext
             entity.HasKey(c => c.Id);
             entity.Property(c => c.MachineName).IsRequired().HasMaxLength(200);
             entity.Property(c => c.Type).IsRequired().HasMaxLength(100);
-            entity.Property(c => c.Payload);
-            entity.Property(c => c.Status).HasConversion<int>();
+            entity.Property(c => c.Status).IsRequired().HasMaxLength(32);
             entity.HasIndex(c => new { c.MachineName, c.Status });
             entity.HasIndex(c => c.CreatedAt);
         });

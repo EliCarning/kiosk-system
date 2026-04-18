@@ -12,7 +12,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
     ?? throw new InvalidOperationException(
         "Connection string 'DefaultConnection' not configured.");
 
-builder.Services.AddDbContext<KioskDbContext>(options =>
+builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<IMachineService, MachineService>();
@@ -23,7 +23,9 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000")
+        policy.WithOrigins(
+                  "http://localhost:3000",
+                  "http://127.0.0.1:3000")
               .AllowAnyMethod()
               .AllowAnyHeader();
     });
@@ -33,7 +35,7 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<KioskDbContext>();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 }
 
@@ -59,6 +61,9 @@ app.MapPost("/api/heartbeat", async (HeartbeatRequest request, IMachineService s
 app.MapGet("/api/machines", async (IMachineService service) =>
     Results.Ok(await service.GetAllAsync()));
 
+app.MapGet("/api/kiosks", async (IMachineService service) =>
+    Results.Ok(await service.GetAllAsync()));
+
 app.MapPost("/api/logs", async (Log log, ILogService service) =>
 {
     if (string.IsNullOrWhiteSpace(log.MachineName))
@@ -66,12 +71,14 @@ app.MapPost("/api/logs", async (Log log, ILogService service) =>
         return Results.BadRequest("machineName is required");
     }
 
-    log.Id = 0;
     var saved = await service.AddAsync(log);
     return Results.Ok(saved);
 });
 
 app.MapGet("/api/machines/{machineName}/logs", async (string machineName, ILogService service) =>
+    Results.Ok(await service.GetByMachineAsync(machineName)));
+
+app.MapGet("/api/kiosks/{machineName}/logs", async (string machineName, ILogService service) =>
     Results.Ok(await service.GetByMachineAsync(machineName)));
 
 app.MapPost("/api/commands", async (CreateCommandRequest request, ICommandService service) =>
@@ -89,6 +96,9 @@ app.MapPost("/api/commands", async (CreateCommandRequest request, ICommandServic
     var command = await service.EnqueueAsync(request);
     return Results.Created($"/api/commands/{command.Id}", command);
 });
+
+app.MapGet("/api/commands/pending/{machineName}", async (string machineName, ICommandService service) =>
+    Results.Ok(await service.GetPendingAsync(machineName)));
 
 app.MapGet("/api/commands/{machineName}/pending", async (string machineName, ICommandService service) =>
     Results.Ok(await service.GetPendingAsync(machineName)));

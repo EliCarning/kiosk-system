@@ -1,13 +1,12 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
 namespace KioskAPI.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class Initial : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -20,7 +19,7 @@ namespace KioskAPI.Migrations
                     MachineName = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     Type = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     Payload = table.Column<string>(type: "text", nullable: true),
-                    Status = table.Column<int>(type: "integer", nullable: false),
+                    Status = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     CompletedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
@@ -33,8 +32,7 @@ namespace KioskAPI.Migrations
                 name: "Logs",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
                     MachineName = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     Level = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                     Message = table.Column<string>(type: "text", nullable: false),
@@ -49,8 +47,7 @@ namespace KioskAPI.Migrations
                 name: "Sites",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
                     Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false)
                 },
                 constraints: table =>
@@ -62,10 +59,9 @@ namespace KioskAPI.Migrations
                 name: "Departments",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
                     Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                    SiteId = table.Column<int>(type: "integer", nullable: false)
+                    SiteId = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -82,14 +78,13 @@ namespace KioskAPI.Migrations
                 name: "Kiosks",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
                     MachineName = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     IpAddress = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     Status = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                     LastSeen = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    SiteId = table.Column<int>(type: "integer", nullable: true),
-                    DepartmentId = table.Column<int>(type: "integer", nullable: true)
+                    SiteId = table.Column<Guid>(type: "uuid", nullable: true),
+                    DepartmentId = table.Column<Guid>(type: "uuid", nullable: true)
                 },
                 constraints: table =>
                 {

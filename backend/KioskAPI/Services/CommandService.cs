@@ -6,9 +6,9 @@ namespace KioskAPI.Services;
 
 public class CommandService : ICommandService
 {
-    private readonly KioskDbContext _db;
+    private readonly AppDbContext _db;
 
-    public CommandService(KioskDbContext db)
+    public CommandService(AppDbContext db)
     {
         _db = db;
     }
@@ -21,7 +21,7 @@ public class CommandService : ICommandService
             MachineName = request.MachineName,
             Type = request.Type,
             Payload = request.Payload,
-            Status = CommandStatus.Pending,
+            Status = CommandStatuses.Pending,
             CreatedAt = DateTime.UtcNow,
             CompletedAt = null
         };
@@ -35,7 +35,7 @@ public class CommandService : ICommandService
     {
         return await _db.Commands
             .AsNoTracking()
-            .Where(c => c.MachineName == machineName && c.Status == CommandStatus.Pending)
+            .Where(c => c.MachineName == machineName && c.Status == CommandStatuses.Pending)
             .OrderBy(c => c.CreatedAt)
             .ToListAsync(ct);
     }
@@ -57,7 +57,7 @@ public class CommandService : ICommandService
             return null;
         }
 
-        command.Status = success ? CommandStatus.Completed : CommandStatus.Failed;
+        command.Status = success ? CommandStatuses.Completed : CommandStatuses.Failed;
         command.CompletedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return command;

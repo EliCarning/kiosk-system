@@ -6,7 +6,7 @@ public class Command
     public string MachineName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
     public string? Payload { get; set; }
-    public CommandStatus Status { get; set; } = CommandStatus.Pending;
+    public string Status { get; set; } = CommandStatuses.Pending;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 }

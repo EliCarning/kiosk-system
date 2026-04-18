@@ -8,9 +8,9 @@ public class MachineService : IMachineService
 {
     private static readonly TimeSpan OnlineThreshold = TimeSpan.FromSeconds(30);
 
-    private readonly KioskDbContext _db;
+    private readonly AppDbContext _db;
 
-    public MachineService(KioskDbContext db)
+    public MachineService(AppDbContext db)
     {
         _db = db;
     }
