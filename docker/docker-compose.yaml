@@ -1,12 +1,31 @@
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:15
-    container_name: kiosk-db
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: kiosk
+  backend:
+    build:
+      context: ../backend/KioskAPI
+      dockerfile: Dockerfile
+    container_name: kiosk-backend
     ports:
-      - "5432:5432"
+      - "5226:5226"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5226
+
+  agent:
+    build:
+      context: ../agent/KioskAgent
+      dockerfile: Dockerfile
+    container_name: kiosk-agent
+    depends_on:
+      - backend
+    environment:
+      - Backend__BaseUrl=http://backend:5226
+
+  frontend:
+    build:
+      context: ../frontend/kiosk-ui
+      dockerfile: Dockerfile
+    container_name: kiosk-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

@@ -28,6 +28,8 @@ const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     loadMachines();
+    const intervalId = window.setInterval(loadMachines, 5000);
+    return () => window.clearInterval(intervalId);
   }, [loadMachines]);
 
   const stats = useMemo(() => {

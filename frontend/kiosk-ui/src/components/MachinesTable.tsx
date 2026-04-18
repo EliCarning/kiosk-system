@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { Machine } from "../types/machine";
 import StatusBadge from "./StatusBadge";
 
@@ -19,6 +20,8 @@ const formatDate = (iso: string): string => {
 };
 
 const MachinesTable: React.FC<MachinesTableProps> = ({ machines }) => {
+  const navigate = useNavigate();
+
   return (
     <div className="table-card">
       <div className="table-card__header">
@@ -37,7 +40,13 @@ const MachinesTable: React.FC<MachinesTableProps> = ({ machines }) => {
           </thead>
           <tbody>
             {machines.map((m) => (
-              <tr key={m.machineName}>
+              <tr
+                key={m.machineName}
+                className="data-table__row--clickable"
+                onClick={() =>
+                  navigate(`/machines/${encodeURIComponent(m.machineName)}`)
+                }
+              >
                 <td className="data-table__primary">{m.machineName}</td>
                 <td className="data-table__mono">{m.ipAddress}</td>
                 <td>
