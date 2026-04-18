@@ -58,11 +58,11 @@ app.MapPost("/api/heartbeat", async (HeartbeatRequest request, IMachineService s
     return Results.Ok(machine);
 });
 
-app.MapGet("/api/machines", async (IMachineService service) =>
-    Results.Ok(await service.GetAllAsync()));
+app.MapGet("/api/machines", async (IMachineService service, CancellationToken ct) =>
+    Results.Ok(await service.GetAllAsync(ct)));
 
-app.MapGet("/api/kiosks", async (IMachineService service) =>
-    Results.Ok(await service.GetAllAsync()));
+app.MapGet("/api/kiosks", async (IMachineService service, CancellationToken ct) =>
+    Results.Ok(await service.GetAllAsync(ct)));
 
 app.MapPost("/api/logs", async (Log log, ILogService service) =>
 {
@@ -75,11 +75,13 @@ app.MapPost("/api/logs", async (Log log, ILogService service) =>
     return Results.Ok(saved);
 });
 
-app.MapGet("/api/machines/{machineName}/logs", async (string machineName, ILogService service) =>
-    Results.Ok(await service.GetByMachineAsync(machineName)));
+app.MapGet("/api/machines/{machineName}/logs",
+    async (string machineName, ILogService service, CancellationToken ct) =>
+        Results.Ok(await service.GetByMachineAsync(machineName, ct)));
 
-app.MapGet("/api/kiosks/{machineName}/logs", async (string machineName, ILogService service) =>
-    Results.Ok(await service.GetByMachineAsync(machineName)));
+app.MapGet("/api/kiosks/{machineName}/logs",
+    async (string machineName, ILogService service, CancellationToken ct) =>
+        Results.Ok(await service.GetByMachineAsync(machineName, ct)));
 
 app.MapPost("/api/commands", async (CreateCommandRequest request, ICommandService service) =>
 {
