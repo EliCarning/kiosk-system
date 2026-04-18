@@ -1,4 +1,5 @@
 import React from "react";
+import AlertsIndicator from "../alerts/AlertsIndicator";
 
 export type StatusFilter = "all" | "online" | "offline" | "warning";
 
@@ -51,6 +52,7 @@ const Topbar: React.FC<TopbarProps> = ({
         </select>
       </div>
       <div className="topbar__actions">
+        <AlertsIndicator />
         {lastUpdated && (
           <span className="topbar__timestamp">
             Updated {lastUpdated.toLocaleTimeString()}
