@@ -8,6 +8,7 @@ import { fetchCommands } from "../../api/commands";
 import { fetchMachineLogs } from "../../api/logs";
 import { CommandType, KioskCommand } from "../../types/command";
 import { MachineLog } from "../../types/log";
+import { useCan } from "../../context/PermissionsContext";
 
 interface KioskDetailsPanelProps {
   kiosk: Kiosk;
@@ -66,6 +67,7 @@ const levelToVariant = (level: string): string => {
 };
 
 const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose }) => {
+  const can = useCan();
   const [actionState, setActionState] = useState<ActionState>({ kind: "idle" });
 
   const [commands, setCommands] = useState<KioskCommand[]>([]);
@@ -314,12 +316,23 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
           {ACTIONS.map((a) => {
             const activeForThis =
               actionState.kind !== "idle" && actionState.type === a.type;
+            const isReboot = a.type === "reboot";
+            if (isReboot && !can.reboot) return null;
+            const permitted = can.operate && (!isReboot || can.reboot);
+            const disabled = isSending || !permitted;
+            const title = !permitted
+              ? "You do not have permission to perform this action"
+              : undefined;
             return (
               <button
                 key={a.type}
-                className={`btn${a.danger ? " btn--danger" : ""}`}
+                className={`btn${a.danger ? " btn--danger" : ""}${
+                  !permitted ? " btn--disabled" : ""
+                }`}
                 onClick={() => handleAction(a.type, a.label)}
-                disabled={isSending}
+                disabled={disabled}
+                title={title}
+                aria-disabled={disabled}
               >
                 {activeForThis && actionState.kind === "sending"
                   ? "Sending..."
@@ -328,6 +341,11 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
             );
           })}
         </div>
+        {!can.operate && (
+          <div className="details-panel__toast">
+            Read-only access — actions are disabled for your role.
+          </div>
+        )}
         {renderFeedback()}
       </section>
 

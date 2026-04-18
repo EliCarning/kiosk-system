@@ -9,6 +9,7 @@ import SettingsModal from "../components/settings/SettingsModal";
 import StateView from "../components/StateView";
 import { useOrganization } from "../hooks/useOrganization";
 import { Kiosk, OrgSummary, Site } from "../types/org";
+import { usePermissions } from "../context/PermissionsContext";
 
 const matchesSearch = (kiosk: Kiosk, q: string): boolean => {
   if (!q) return true;
@@ -66,6 +67,12 @@ const summarize = (sites: Site[]): OrgSummary => {
 };
 
 const OperationsPage: React.FC = () => {
+  const {
+    permissions,
+    loading: permissionsLoading,
+    error: permissionsError,
+    refresh: refreshPermissions,
+  } = usePermissions();
   const { org, loading, error, refresh } = useOrganization();
 
   const [selectedSiteId, setSelectedSiteId] = useState<string | "all">("all");
@@ -181,6 +188,48 @@ const OperationsPage: React.FC = () => {
       </>
     );
   };
+
+  if (permissionsLoading && !permissions) {
+    return (
+      <div className="ops-layout ops-layout--blocked">
+        <StateView
+          variant="loading"
+          title="Checking access"
+          message="Verifying your permissions..."
+        />
+      </div>
+    );
+  }
+
+  if (permissionsError) {
+    return (
+      <div className="ops-layout ops-layout--blocked">
+        <StateView
+          variant="error"
+          title="Unable to verify access"
+          message={permissionsError}
+          onRetry={refreshPermissions}
+        />
+      </div>
+    );
+  }
+
+  if (!permissions?.canView) {
+    return (
+      <div className="ops-layout ops-layout--blocked">
+        <StateView
+          variant="error"
+          title="Access denied"
+          message={
+            permissions?.username
+              ? `${permissions.username} is not authorized to view the kiosk dashboard.`
+              : "You are not authorized to view the kiosk dashboard."
+          }
+          onRetry={refreshPermissions}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="ops-layout">

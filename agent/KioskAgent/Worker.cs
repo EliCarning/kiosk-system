@@ -5,6 +5,8 @@ namespace KioskAgent;
 
 public class Worker : BackgroundService
 {
+    private const string AgentKeyHeader = "X-Agent-Key";
+
     private readonly ILogger<Worker> _logger;
     private readonly IConfiguration _configuration;
     private readonly HttpClient _httpClient;
@@ -14,6 +16,18 @@ public class Worker : BackgroundService
         _logger = logger;
         _configuration = configuration;
         _httpClient = new HttpClient();
+
+        var apiKey = _configuration["Agent:ApiKey"];
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            _httpClient.DefaultRequestHeaders.Remove(AgentKeyHeader);
+            _httpClient.DefaultRequestHeaders.Add(AgentKeyHeader, apiKey);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Agent:ApiKey is not configured. Authenticated endpoints will fail.");
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -135,41 +149,57 @@ public class Worker : BackgroundService
         string logsUrl,
         CancellationToken stoppingToken)
     {
+        await MarkCommandRunningAsync(backendBaseUrl, command.Id, logsUrl, stoppingToken);
+
         var type = command.Type?.Trim() ?? string.Empty;
         var success = true;
         string level;
         string message;
 
-        switch (type.ToLowerInvariant())
+        try
         {
-            case "ping":
-                level = "Info";
-                message = "Ping received";
-                break;
-            case "restart_service":
-                level = "Info";
-                message = "Restart service simulated";
-                break;
-            case "restart_browser":
-                level = "Info";
-                message = "Restart browser simulated";
-                break;
-            case "gpupdate":
-                level = "Info";
-                message = "GPUpdate simulated";
-                break;
-            case "reboot":
-                level = "Info";
-                message = "Reboot simulated";
-                break;
-            default:
-                level = "Warning";
-                message = $"Unknown command type: {type}";
-                success = false;
-                _logger.LogWarning(
-                    "Unknown command type {Type} for command {Id}",
-                    type, command.Id);
-                break;
+            switch (type.ToLowerInvariant())
+            {
+                case "ping":
+                    level = "Info";
+                    message = "Ping received";
+                    break;
+                case "refresh_cache":
+                    level = "Info";
+                    message = "Refresh cache simulated";
+                    break;
+                case "restart_service":
+                    level = "Info";
+                    message = "Restart service simulated";
+                    break;
+                case "restart_browser":
+                    level = "Info";
+                    message = "Restart browser simulated";
+                    break;
+                case "gpupdate":
+                    level = "Info";
+                    message = "GPUpdate simulated";
+                    break;
+                case "reboot":
+                    level = "Info";
+                    message = "Reboot simulated";
+                    break;
+                default:
+                    level = "Warning";
+                    message = $"Unknown command type: {type}";
+                    success = false;
+                    _logger.LogWarning(
+                        "Unknown command type {Type} for command {Id}",
+                        type, command.Id);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            level = "Error";
+            message = $"Command execution failed: {ex.Message}";
+            success = false;
+            _logger.LogError(ex, "Error executing command {Id}", command.Id);
         }
 
         if (success)
@@ -182,6 +212,37 @@ public class Worker : BackgroundService
         await SendLogAsync(logsUrl, level, message, stoppingToken);
         await CompleteCommandAsync(
             backendBaseUrl, command.Id, success, logsUrl, stoppingToken);
+    }
+
+    private async Task MarkCommandRunningAsync(
+        string backendBaseUrl,
+        Guid commandId,
+        string logsUrl,
+        CancellationToken stoppingToken)
+    {
+        var startUrl = $"{backendBaseUrl}/api/commands/{commandId}/start";
+        try
+        {
+            var response = await _httpClient.PostAsync(startUrl, content: null, stoppingToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Failed to mark command {Id} running: status {Status}",
+                    commandId, response.StatusCode);
+                await SendLogAsync(
+                    logsUrl, "Warning",
+                    $"Mark running {commandId} failed with status {(int)response.StatusCode}",
+                    stoppingToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error marking command {Id} running", commandId);
+            await SendLogAsync(
+                logsUrl, "Error",
+                $"Mark running {commandId} exception: {ex.Message}",
+                stoppingToken);
+        }
     }
 
     private async Task CompleteCommandAsync(

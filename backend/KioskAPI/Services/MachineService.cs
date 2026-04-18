@@ -6,13 +6,16 @@ namespace KioskAPI.Services;
 
 public class MachineService : IMachineService
 {
-    private static readonly TimeSpan OnlineThreshold = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan OnlineThreshold = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan OfflineAlertThreshold = TimeSpan.FromMinutes(2);
 
     private readonly AppDbContext _db;
+    private readonly IAlertService _alerts;
 
-    public MachineService(AppDbContext db)
+    public MachineService(AppDbContext db, IAlertService alerts)
     {
         _db = db;
+        _alerts = alerts;
     }
 
     public async Task<IEnumerable<MachineStatus>> GetAllAsync(CancellationToken ct = default)
@@ -22,6 +25,19 @@ public class MachineService : IMachineService
             .AsNoTracking()
             .OrderBy(k => k.MachineName)
             .ToListAsync(ct);
+
+        foreach (var k in kiosks)
+        {
+            if ((now - k.LastSeen) > OfflineAlertThreshold)
+            {
+                await _alerts.RaiseAsync(
+                    k.MachineName,
+                    AlertTypes.Offline,
+                    $"{k.MachineName} has not reported in over {(int)OfflineAlertThreshold.TotalMinutes} minute(s).",
+                    dedupeActive: true,
+                    ct: ct);
+            }
+        }
 
         return kiosks.Select(k => new MachineStatus
         {
@@ -57,6 +73,21 @@ public class MachineService : IMachineService
         }
 
         await _db.SaveChangesAsync(ct);
+
+        var activeOffline = await _db.Alerts
+            .Where(a => a.MachineName == request.MachineName
+                        && a.Type == AlertTypes.Offline
+                        && !a.IsResolved)
+            .ToListAsync(ct);
+        if (activeOffline.Count > 0)
+        {
+            foreach (var a in activeOffline)
+            {
+                a.IsResolved = true;
+                a.ResolvedAt = now;
+            }
+            await _db.SaveChangesAsync(ct);
+        }
 
         return new MachineStatus
         {

@@ -25,6 +25,8 @@ const statusVariant = (status: string): string => {
   const s = status.toLowerCase();
   if (s === "completed") return "ok";
   if (s === "failed") return "error";
+  if (s === "running") return "info";
+  if (s === "pending") return "warning";
   return "warning";
 };
 
@@ -55,25 +57,28 @@ const CommandHistory: React.FC<CommandHistoryProps> = ({
 
   return (
     <ul className="cmd-history">
-      {commands.map((c) => (
-        <li key={c.id} className="cmd-history__row">
-          <div className="cmd-history__main">
-            <span className="cmd-history__type">{c.type}</span>
-            <span
-              className={`check-badge check-badge--${statusVariant(c.status)}`}
-            >
-              <span className="check-badge__dot" />
-              {c.status}
-            </span>
-          </div>
-          <div className="cmd-history__meta">
-            <span>created {formatDate(c.createdAt)}</span>
-            {c.completedAt && (
-              <span> · done {formatDate(c.completedAt)}</span>
-            )}
-          </div>
-        </li>
-      ))}
+      {commands.map((c) => {
+        const variant = statusVariant(c.status);
+        return (
+          <li key={c.id} className="cmd-history__row">
+            <div className="cmd-history__main">
+              <span className="cmd-history__type">{c.type}</span>
+              <span
+                className={`check-badge check-badge--${variant} log-level log-level--${variant}`}
+              >
+                <span className="check-badge__dot" />
+                {c.status}
+              </span>
+            </div>
+            <div className="cmd-history__meta">
+              <span>created {formatDate(c.createdAt)}</span>
+              {c.completedAt && (
+                <span> · done {formatDate(c.completedAt)}</span>
+              )}
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 };

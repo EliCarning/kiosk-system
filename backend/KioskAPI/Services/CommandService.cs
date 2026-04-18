@@ -7,10 +7,12 @@ namespace KioskAPI.Services;
 public class CommandService : ICommandService
 {
     private readonly AppDbContext _db;
+    private readonly IAlertService _alerts;
 
-    public CommandService(AppDbContext db)
+    public CommandService(AppDbContext db, IAlertService alerts)
     {
         _db = db;
+        _alerts = alerts;
     }
 
     public async Task<Command> EnqueueAsync(CreateCommandRequest request, CancellationToken ct = default)
@@ -49,6 +51,23 @@ public class CommandService : ICommandService
             .ToListAsync(ct);
     }
 
+    public async Task<Command?> MarkRunningAsync(Guid id, CancellationToken ct = default)
+    {
+        var command = await _db.Commands.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (command is null)
+        {
+            return null;
+        }
+
+        if (command.Status == CommandStatuses.Pending)
+        {
+            command.Status = CommandStatuses.Running;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return command;
+    }
+
     public async Task<Command?> CompleteAsync(Guid id, bool success, CancellationToken ct = default)
     {
         var command = await _db.Commands.FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -60,6 +79,17 @@ public class CommandService : ICommandService
         command.Status = success ? CommandStatuses.Completed : CommandStatuses.Failed;
         command.CompletedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        if (!success)
+        {
+            await _alerts.RaiseAsync(
+                command.MachineName,
+                AlertTypes.CommandFailed,
+                $"Command '{command.Type}' failed on {command.MachineName}",
+                dedupeActive: false,
+                ct: ct);
+        }
+
         return command;
     }
 

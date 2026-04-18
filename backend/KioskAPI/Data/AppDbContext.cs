@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<Kiosk> Kiosks => Set<Kiosk>();
     public DbSet<Command> Commands => Set<Command>();
     public DbSet<Log> Logs => Set<Log>();
+    public DbSet<Alert> Alerts => Set<Alert>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -69,6 +70,16 @@ public class AppDbContext : DbContext
             entity.Property(l => l.Level).IsRequired().HasMaxLength(32);
             entity.Property(l => l.Message).IsRequired();
             entity.HasIndex(l => new { l.MachineName, l.Timestamp });
+        });
+
+        modelBuilder.Entity<Alert>(entity =>
+        {
+            entity.HasKey(a => a.Id);
+            entity.Property(a => a.MachineName).IsRequired().HasMaxLength(200);
+            entity.Property(a => a.Type).IsRequired().HasMaxLength(64);
+            entity.Property(a => a.Message).IsRequired();
+            entity.HasIndex(a => new { a.MachineName, a.Type, a.IsResolved });
+            entity.HasIndex(a => a.CreatedAt);
         });
     }
 }
