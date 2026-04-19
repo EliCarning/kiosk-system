@@ -8,6 +8,7 @@ import React, {
   useState,
 } from "react";
 import { Alert, fetchAlerts, resolveAlert } from "../api/alerts";
+import { RealtimeEvents, subscribeRealtime } from "../realtime/events";
 
 interface AlertsState {
   alerts: Alert[];
@@ -64,9 +65,13 @@ export const AlertsProvider: React.FC<{ children: React.ReactNode }> = ({
     mountedRef.current = true;
     load();
     const timer = window.setInterval(load, POLL_INTERVAL_MS);
+    const unsubscribe = subscribeRealtime(RealtimeEvents.AlertCreated, () => {
+      load();
+    });
     return () => {
       mountedRef.current = false;
       window.clearInterval(timer);
+      unsubscribe();
     };
   }, [load]);
 

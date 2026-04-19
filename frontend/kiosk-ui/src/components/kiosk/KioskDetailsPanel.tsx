@@ -9,6 +9,7 @@ import { fetchMachineLogs } from "../../api/logs";
 import { CommandType, KioskCommand } from "../../types/command";
 import { MachineLog } from "../../types/log";
 import { useCan } from "../../context/PermissionsContext";
+import { RealtimeEvents, subscribeRealtime } from "../../realtime/events";
 
 interface KioskDetailsPanelProps {
   kiosk: Kiosk;
@@ -109,8 +110,19 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
     setCommands([]);
     loadCommands();
     const id = window.setInterval(loadCommands, COMMANDS_POLL_MS);
-    return () => window.clearInterval(id);
-  }, [loadCommands]);
+    const unsubscribe = subscribeRealtime<{ machineName?: string }>(
+      RealtimeEvents.CommandUpdated,
+      (payload) => {
+        if (!payload || payload.machineName === kiosk.machineName) {
+          loadCommands();
+        }
+      }
+    );
+    return () => {
+      window.clearInterval(id);
+      unsubscribe();
+    };
+  }, [loadCommands, kiosk.machineName]);
 
   useEffect(() => {
     setLogsLoading(true);

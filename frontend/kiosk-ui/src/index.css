@@ -1432,3 +1432,129 @@ button {
   font-size: 11px;
   padding: 4px 10px;
 }
+
+.alerts-panel__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.alerts-panel__tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.alerts-panel__tab:hover {
+  color: var(--text-primary);
+}
+
+.alerts-panel__tab--active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+/* Notifications */
+.notifications-host {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 80;
+  pointer-events: none;
+  max-width: 360px;
+}
+
+.notification {
+  pointer-events: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  animation: notification-in 180ms ease-out;
+}
+
+.notification:hover {
+  background: var(--bg-surface-hover);
+}
+
+.notification--success {
+  border-left-color: #22c55e;
+}
+
+.notification--warning {
+  border-left-color: #f59e0b;
+}
+
+.notification--error {
+  border-left-color: var(--danger);
+}
+
+.notification__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notification__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.notification__close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.notification__close:hover {
+  color: var(--text-primary);
+}
+
+.notification__message {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.notification__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.notification__machine {
+  font-family: var(--font-mono, monospace);
+}
+
+@keyframes notification-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

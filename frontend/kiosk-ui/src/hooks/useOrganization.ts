@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchOrganization } from "../api/org";
 import { Organization } from "../types/org";
+import { RealtimeEvents, subscribeRealtime } from "../realtime/events";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -31,7 +32,16 @@ export function useOrganization(): OrgState {
   useEffect(() => {
     load();
     const id = window.setInterval(load, POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    const unsubscribe = subscribeRealtime(
+      RealtimeEvents.MachineUpdated,
+      () => {
+        load();
+      }
+    );
+    return () => {
+      window.clearInterval(id);
+      unsubscribe();
+    };
   }, [load]);
 
   return { org, loading, error, refresh: load };

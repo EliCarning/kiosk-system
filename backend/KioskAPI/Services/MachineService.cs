@@ -11,11 +11,13 @@ public class MachineService : IMachineService
 
     private readonly AppDbContext _db;
     private readonly IAlertService _alerts;
+    private readonly IRealtimeNotifier _realtime;
 
-    public MachineService(AppDbContext db, IAlertService alerts)
+    public MachineService(AppDbContext db, IAlertService alerts, IRealtimeNotifier realtime)
     {
         _db = db;
         _alerts = alerts;
+        _realtime = realtime;
     }
 
     public async Task<IEnumerable<MachineStatus>> GetAllAsync(CancellationToken ct = default)
@@ -88,6 +90,8 @@ public class MachineService : IMachineService
             }
             await _db.SaveChangesAsync(ct);
         }
+
+        await _realtime.MachineUpdatedAsync(kiosk.MachineName, "Online", kiosk.LastSeen, ct);
 
         return new MachineStatus
         {

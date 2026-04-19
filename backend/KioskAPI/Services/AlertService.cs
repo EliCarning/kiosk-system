@@ -7,10 +7,12 @@ namespace KioskAPI.Services;
 public class AlertService : IAlertService
 {
     private readonly AppDbContext _db;
+    private readonly IRealtimeNotifier _realtime;
 
-    public AlertService(AppDbContext db)
+    public AlertService(AppDbContext db, IRealtimeNotifier realtime)
     {
         _db = db;
+        _realtime = realtime;
     }
 
     public async Task<IEnumerable<Alert>> GetActiveAsync(CancellationToken ct = default)
@@ -18,6 +20,14 @@ public class AlertService : IAlertService
         return await _db.Alerts
             .AsNoTracking()
             .Where(a => !a.IsResolved)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<Alert>> GetHistoryAsync(CancellationToken ct = default)
+    {
+        return await _db.Alerts
+            .AsNoTracking()
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync(ct);
     }
@@ -68,6 +78,7 @@ public class AlertService : IAlertService
 
         _db.Alerts.Add(alert);
         await _db.SaveChangesAsync(ct);
+        await _realtime.AlertCreatedAsync(alert, ct);
         return alert;
     }
 }

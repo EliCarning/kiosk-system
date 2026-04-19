@@ -8,11 +8,13 @@ public class CommandService : ICommandService
 {
     private readonly AppDbContext _db;
     private readonly IAlertService _alerts;
+    private readonly IRealtimeNotifier _realtime;
 
-    public CommandService(AppDbContext db, IAlertService alerts)
+    public CommandService(AppDbContext db, IAlertService alerts, IRealtimeNotifier realtime)
     {
         _db = db;
         _alerts = alerts;
+        _realtime = realtime;
     }
 
     public async Task<Command> EnqueueAsync(CreateCommandRequest request, CancellationToken ct = default)
@@ -30,6 +32,7 @@ public class CommandService : ICommandService
 
         _db.Commands.Add(command);
         await _db.SaveChangesAsync(ct);
+        await _realtime.CommandUpdatedAsync(command, ct);
         return command;
     }
 
@@ -63,6 +66,7 @@ public class CommandService : ICommandService
         {
             command.Status = CommandStatuses.Running;
             await _db.SaveChangesAsync(ct);
+            await _realtime.CommandUpdatedAsync(command, ct);
         }
 
         return command;
@@ -79,6 +83,7 @@ public class CommandService : ICommandService
         command.Status = success ? CommandStatuses.Completed : CommandStatuses.Failed;
         command.CompletedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await _realtime.CommandUpdatedAsync(command, ct);
 
         if (!success)
         {

@@ -1,5 +1,6 @@
 using KioskAPI.Auth;
 using KioskAPI.Data;
+using KioskAPI.Hubs;
 using KioskAPI.Models;
 using KioskAPI.Services;
 using Microsoft.AspNetCore.Authentication;
@@ -24,6 +25,9 @@ builder.Services.AddScoped<IMachineService, MachineService>();
 builder.Services.AddScoped<ILogService, LogService>();
 builder.Services.AddScoped<ICommandService, CommandService>();
 builder.Services.AddScoped<IAlertService, AlertService>();
+builder.Services.AddSingleton<IRealtimeNotifier, RealtimeNotifier>();
+builder.Services.AddSignalR();
+builder.Services.AddHostedService<OfflineAlertWorker>();
 
 builder.Services.AddCors(options =>
 {
@@ -255,11 +259,17 @@ app.MapGet("/api/alerts", async (IAlertService service, CancellationToken ct) =>
     Results.Ok(await service.GetActiveAsync(ct)))
     .RequireAuthorization(KioskPolicies.RequireViewer);
 
+app.MapGet("/api/alerts/history", async (IAlertService service, CancellationToken ct) =>
+    Results.Ok(await service.GetHistoryAsync(ct)))
+    .RequireAuthorization(KioskPolicies.RequireViewer);
+
 app.MapPost("/api/alerts/{id:guid}/resolve",
     async (Guid id, IAlertService service, CancellationToken ct) =>
     {
         var alert = await service.ResolveAsync(id, ct);
         return alert is null ? Results.NotFound() : Results.Ok(alert);
     }).RequireAuthorization(KioskPolicies.RequireOperator);
+
+app.MapHub<KioskHub>("/hubs/kiosk");
 
 app.Run();
