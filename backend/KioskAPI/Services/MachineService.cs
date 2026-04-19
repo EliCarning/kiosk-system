@@ -46,7 +46,9 @@ public class MachineService : IMachineService
             MachineName = k.MachineName,
             IpAddress = k.IpAddress,
             LastSeen = k.LastSeen,
-            Status = (now - k.LastSeen) <= OnlineThreshold ? "Online" : "Offline"
+            Status = (now - k.LastSeen) <= OnlineThreshold ? "Online" : "Offline",
+            SiteId = k.SiteId,
+            DepartmentId = k.DepartmentId
         });
     }
 
@@ -98,7 +100,9 @@ public class MachineService : IMachineService
             MachineName = kiosk.MachineName,
             IpAddress = kiosk.IpAddress,
             LastSeen = kiosk.LastSeen,
-            Status = "Online"
+            Status = "Online",
+            SiteId = kiosk.SiteId,
+            DepartmentId = kiosk.DepartmentId
         };
     }
 }

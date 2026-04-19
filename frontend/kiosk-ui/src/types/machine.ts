@@ -5,4 +5,6 @@ export interface Machine {
   ipAddress: string;
   lastSeen: string;
   status: MachineStatus;
+  siteId?: string | null;
+  departmentId?: string | null;
 }

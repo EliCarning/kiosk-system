@@ -270,6 +270,123 @@ app.MapPost("/api/alerts/{id:guid}/resolve",
         return alert is null ? Results.NotFound() : Results.Ok(alert);
     }).RequireAuthorization(KioskPolicies.RequireOperator);
 
+app.MapGet("/api/sites", async (AppDbContext db, CancellationToken ct) =>
+{
+    var sites = await db.Sites
+        .AsNoTracking()
+        .OrderBy(s => s.Name)
+        .Select(s => new { id = s.Id, name = s.Name })
+        .ToListAsync(ct);
+    return Results.Ok(sites);
+}).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/sites/{siteId:guid}/departments",
+    async (Guid siteId, AppDbContext db, CancellationToken ct) =>
+    {
+        var siteExists = await db.Sites.AnyAsync(s => s.Id == siteId, ct);
+        if (!siteExists) return Results.NotFound();
+
+        var depts = await db.Departments
+            .AsNoTracking()
+            .Where(d => d.SiteId == siteId)
+            .OrderBy(d => d.Name)
+            .Select(d => new { id = d.Id, name = d.Name, siteId = d.SiteId })
+            .ToListAsync(ct);
+        return Results.Ok(depts);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/sites/{siteId:guid}/kiosks",
+    async (Guid siteId, AppDbContext db, CancellationToken ct) =>
+    {
+        var now = DateTime.UtcNow;
+        var online = MachineService.OnlineThreshold;
+        var kiosks = await db.Kiosks
+            .AsNoTracking()
+            .Where(k => k.SiteId == siteId)
+            .OrderBy(k => k.MachineName)
+            .ToListAsync(ct);
+        return Results.Ok(kiosks.Select(k => new MachineStatus
+        {
+            MachineName = k.MachineName,
+            IpAddress = k.IpAddress,
+            LastSeen = k.LastSeen,
+            Status = (now - k.LastSeen) <= online ? "Online" : "Offline",
+            SiteId = k.SiteId,
+            DepartmentId = k.DepartmentId
+        }));
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/departments/{departmentId:guid}/kiosks",
+    async (Guid departmentId, AppDbContext db, CancellationToken ct) =>
+    {
+        var now = DateTime.UtcNow;
+        var online = MachineService.OnlineThreshold;
+        var kiosks = await db.Kiosks
+            .AsNoTracking()
+            .Where(k => k.DepartmentId == departmentId)
+            .OrderBy(k => k.MachineName)
+            .ToListAsync(ct);
+        return Results.Ok(kiosks.Select(k => new MachineStatus
+        {
+            MachineName = k.MachineName,
+            IpAddress = k.IpAddress,
+            LastSeen = k.LastSeen,
+            Status = (now - k.LastSeen) <= online ? "Online" : "Offline",
+            SiteId = k.SiteId,
+            DepartmentId = k.DepartmentId
+        }));
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapPost("/api/kiosks/{machineName}/assign",
+    async (string machineName, AssignKioskRequest request, AppDbContext db,
+           IRealtimeNotifier realtime, CancellationToken ct) =>
+    {
+        var kiosk = await db.Kiosks.FirstOrDefaultAsync(k => k.MachineName == machineName, ct);
+        if (kiosk is null) return Results.NotFound();
+
+        if (request.SiteId is Guid siteId)
+        {
+            var siteExists = await db.Sites.AnyAsync(s => s.Id == siteId, ct);
+            if (!siteExists) return Results.BadRequest("Unknown siteId");
+            kiosk.SiteId = siteId;
+        }
+        else
+        {
+            kiosk.SiteId = null;
+        }
+
+        if (request.DepartmentId is Guid deptId)
+        {
+            var dept = await db.Departments.FirstOrDefaultAsync(d => d.Id == deptId, ct);
+            if (dept is null) return Results.BadRequest("Unknown departmentId");
+            if (kiosk.SiteId is Guid s && dept.SiteId != s)
+            {
+                return Results.BadRequest("Department does not belong to the provided site");
+            }
+            kiosk.DepartmentId = deptId;
+            if (kiosk.SiteId is null) kiosk.SiteId = dept.SiteId;
+        }
+        else
+        {
+            kiosk.DepartmentId = null;
+        }
+
+        await db.SaveChangesAsync(ct);
+        await realtime.MachineUpdatedAsync(kiosk.MachineName, kiosk.Status, kiosk.LastSeen, ct);
+
+        return Results.Ok(new MachineStatus
+        {
+            MachineName = kiosk.MachineName,
+            IpAddress = kiosk.IpAddress,
+            LastSeen = kiosk.LastSeen,
+            Status = kiosk.Status,
+            SiteId = kiosk.SiteId,
+            DepartmentId = kiosk.DepartmentId
+        });
+    }).RequireAuthorization(KioskPolicies.RequireOperator);
+
 app.MapHub<KioskHub>("/hubs/kiosk");
 
 app.Run();
+
+public record AssignKioskRequest(Guid? SiteId, Guid? DepartmentId);
