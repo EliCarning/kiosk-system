@@ -11,6 +11,8 @@ interface TopbarProps {
   onRefresh: () => void;
   refreshing: boolean;
   lastUpdated: Date | null;
+  sidePanelOpen?: boolean;
+  onToggleSidePanel?: () => void;
 }
 
 const statusOptions: { value: StatusFilter; label: string }[] = [
@@ -20,6 +22,23 @@ const statusOptions: { value: StatusFilter; label: string }[] = [
   { value: "warning", label: "Warning" },
 ];
 
+const PanelIcon = () => (
+  <svg
+    viewBox="0 0 24 24"
+    width="16"
+    height="16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </svg>
+);
+
 const Topbar: React.FC<TopbarProps> = ({
   search,
   onSearchChange,
@@ -28,10 +47,26 @@ const Topbar: React.FC<TopbarProps> = ({
   onRefresh,
   refreshing,
   lastUpdated,
+  sidePanelOpen,
+  onToggleSidePanel,
 }) => {
   return (
     <div className="topbar">
       <div className="topbar__filters">
+        {onToggleSidePanel && (
+          <button
+            type="button"
+            className={`btn btn--ghost topbar__side-toggle${
+              sidePanelOpen ? " is-active" : ""
+            }`}
+            onClick={onToggleSidePanel}
+            aria-pressed={sidePanelOpen ? true : false}
+            title={sidePanelOpen ? "Hide hierarchy" : "Show hierarchy"}
+          >
+            <PanelIcon />
+            <span>Hierarchy</span>
+          </button>
+        )}
         <input
           type="search"
           className="input"

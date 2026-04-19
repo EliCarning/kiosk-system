@@ -1,32 +1,145 @@
 import React from "react";
 import SummaryCard from "../SummaryCard";
-import { OrgSummary } from "../../types/org";
+import {
+  DepartmentSummary,
+  GlobalSummary,
+  SiteSummary,
+} from "../../api/dashboard";
 
-interface SummaryCardsProps {
-  summary: OrgSummary;
+type Kpi = {
+  label: string;
+  value: number | string;
+  hint?: string;
+  accent?: "default" | "online" | "offline" | "warning";
+};
+
+const healthPct = (online: number, total: number): number =>
+  total === 0 ? 0 : Math.round((online / total) * 100);
+
+const globalKpis = (s: GlobalSummary): Kpi[] => [
+  {
+    label: "Sites",
+    value: s.totalSites,
+    hint: `${s.totalDepartments} departments`,
+  },
+  {
+    label: "Kiosks",
+    value: s.totalKiosks,
+    hint: `${healthPct(s.onlineKiosks, s.totalKiosks)}% online`,
+  },
+  {
+    label: "Online",
+    value: s.onlineKiosks,
+    accent: "online",
+    hint: `${s.offlineKiosks} offline`,
+  },
+  {
+    label: "Active alerts",
+    value: s.activeAlerts,
+    accent: s.activeAlerts > 0 ? "offline" : "default",
+    hint: `${s.failedCommandsLast24h} failed cmds · 24h`,
+  },
+];
+
+const siteKpis = (s: SiteSummary): Kpi[] => [
+  {
+    label: "Departments",
+    value: s.totalDepartments,
+  },
+  {
+    label: "Kiosks",
+    value: s.totalKiosks,
+    hint: `${healthPct(s.onlineKiosks, s.totalKiosks)}% online`,
+  },
+  {
+    label: "Online",
+    value: s.onlineKiosks,
+    accent: "online",
+    hint: `${s.offlineKiosks} offline`,
+  },
+  {
+    label: "Active alerts",
+    value: s.activeAlerts,
+    accent: s.activeAlerts > 0 ? "offline" : "default",
+    hint: `${s.failedCommandsLast24h} failed cmds · 24h`,
+  },
+];
+
+const deptKpis = (d: DepartmentSummary): Kpi[] => [
+  {
+    label: "Kiosks",
+    value: d.totalKiosks,
+    hint: `${healthPct(d.onlineKiosks, d.totalKiosks)}% online`,
+  },
+  {
+    label: "Online",
+    value: d.onlineKiosks,
+    accent: "online",
+  },
+  {
+    label: "Offline",
+    value: d.offlineKiosks,
+    accent: d.offlineKiosks > 0 ? "offline" : "default",
+  },
+  {
+    label: "Active alerts",
+    value: d.activeAlerts,
+    accent: d.activeAlerts > 0 ? "offline" : "default",
+    hint: `${d.failedCommandsLast24h} failed cmds · 24h`,
+  },
+];
+
+interface Props {
+  scope: "global" | "site" | "department";
+  global?: GlobalSummary | null;
+  site?: SiteSummary | null;
+  department?: DepartmentSummary | null;
+  loading?: boolean;
 }
 
-const SummaryCards: React.FC<SummaryCardsProps> = ({ summary }) => (
-  <section className="summary-grid">
-    <SummaryCard label="Sites" value={summary.sites} />
-    <SummaryCard
-      label="Kiosks"
-      value={summary.totalKiosks}
-      hint="Across all sites"
-    />
-    <SummaryCard
-      label="Online"
-      value={summary.online}
-      accent="online"
-      hint="Reporting normally"
-    />
-    <SummaryCard
-      label="Issues"
-      value={summary.offline + summary.warnings}
-      accent={summary.offline > 0 ? "offline" : "warning"}
-      hint={`${summary.offline} offline · ${summary.warnings} warnings`}
-    />
-  </section>
-);
+const SummaryCards: React.FC<Props> = ({
+  scope,
+  global,
+  site,
+  department,
+  loading,
+}) => {
+  let cards: Kpi[] = [];
+  if (scope === "global" && global) cards = globalKpis(global);
+  else if (scope === "site" && site) cards = siteKpis(site);
+  else if (scope === "department" && department) cards = deptKpis(department);
+
+  if (cards.length === 0) {
+    return (
+      <section className="summary-grid">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className={`summary-card summary-card--default${
+              loading ? " summary-card--loading" : ""
+            }`}
+          >
+            <div className="summary-card__label">—</div>
+            <div className="summary-card__value">—</div>
+          </div>
+        ))}
+      </section>
+    );
+  }
+
+  return (
+    <section className="summary-grid">
+      {cards.map((k) => (
+        <SummaryCard
+          key={k.label}
+          label={k.label}
+          value={k.value}
+          accent={k.accent ?? "default"}
+          hint={k.hint}
+        />
+      ))}
+    </section>
+  );
+};
 
 export default SummaryCards;

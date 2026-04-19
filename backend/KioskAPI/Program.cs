@@ -25,6 +25,7 @@ builder.Services.AddScoped<IMachineService, MachineService>();
 builder.Services.AddScoped<ILogService, LogService>();
 builder.Services.AddScoped<ICommandService, CommandService>();
 builder.Services.AddScoped<IAlertService, AlertService>();
+builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddSingleton<IRealtimeNotifier, RealtimeNotifier>();
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<OfflineAlertWorker>();
@@ -384,6 +385,51 @@ app.MapPost("/api/kiosks/{machineName}/assign",
             DepartmentId = kiosk.DepartmentId
         });
     }).RequireAuthorization(KioskPolicies.RequireOperator);
+
+app.MapGet("/api/dashboard/summary",
+    async (IDashboardService svc, CancellationToken ct) =>
+        Results.Ok(await svc.GetGlobalSummaryAsync(ct)))
+    .RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/sites/{siteId:guid}/summary",
+    async (Guid siteId, IDashboardService svc, CancellationToken ct) =>
+    {
+        var result = await svc.GetSiteSummaryAsync(siteId, ct);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/departments/{departmentId:guid}/summary",
+    async (Guid departmentId, IDashboardService svc, CancellationToken ct) =>
+    {
+        var result = await svc.GetDepartmentSummaryAsync(departmentId, ct);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/sites/{siteId:guid}/issues",
+    async (Guid siteId, IDashboardService svc, CancellationToken ct) =>
+    {
+        var result = await svc.GetSiteIssuesAsync(siteId, ct);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/departments/{departmentId:guid}/issues",
+    async (Guid departmentId, IDashboardService svc, CancellationToken ct) =>
+    {
+        var result = await svc.GetDepartmentIssuesAsync(departmentId, ct);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/kiosks/{machineName}/overview",
+    async (string machineName, IDashboardService svc, CancellationToken ct) =>
+    {
+        var result = await svc.GetKioskOverviewAsync(machineName, ct);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/kiosks/{machineName}/recent-alerts",
+    async (string machineName, IDashboardService svc, CancellationToken ct) =>
+        Results.Ok(await svc.GetKioskRecentAlertsAsync(machineName, 20, ct)))
+    .RequireAuthorization(KioskPolicies.RequireViewer);
 
 app.MapHub<KioskHub>("/hubs/kiosk");
 

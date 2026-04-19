@@ -2,13 +2,18 @@ import React, { useEffect, useMemo, useState } from "react";
 import Sidebar from "../components/layout/Sidebar";
 import Topbar, { StatusFilter } from "../components/layout/Topbar";
 import SummaryCards from "../components/summary/SummaryCards";
+import IssuesPanel from "../components/summary/IssuesPanel";
 import SiteOverviewCard from "../components/site/SiteOverviewCard";
 import DepartmentSection from "../components/department/DepartmentSection";
 import KioskDetailsPanel from "../components/kiosk/KioskDetailsPanel";
 import SettingsModal from "../components/settings/SettingsModal";
 import StateView from "../components/StateView";
 import { useOrganization } from "../hooks/useOrganization";
-import { Kiosk, OrgSummary, Site } from "../types/org";
+import {
+  DashboardScope,
+  useDashboardScope,
+} from "../hooks/useDashboardScope";
+import { Kiosk, Site } from "../types/org";
 import { usePermissions } from "../context/PermissionsContext";
 
 const matchesSearch = (kiosk: Kiosk, q: string): boolean => {
@@ -52,20 +57,6 @@ const filterSites = (
     .filter((s) => s.departments.length > 0);
 };
 
-const summarize = (sites: Site[]): OrgSummary => {
-  const all = sites.flatMap((s) => s.departments.flatMap((d) => d.kiosks));
-  return {
-    sites: sites.length,
-    totalKiosks: all.length,
-    online: all.filter((k) => k.status.toLowerCase() === "online").length,
-    offline: all.filter((k) => k.status.toLowerCase() === "offline").length,
-    warnings: all.filter((k) => {
-      const s = k.status.toLowerCase();
-      return s === "warning" || s === "degraded";
-    }).length,
-  };
-};
-
 const OperationsPage: React.FC = () => {
   const {
     permissions,
@@ -82,6 +73,39 @@ const OperationsPage: React.FC = () => {
   const [selectedKiosk, setSelectedKiosk] = useState<Kiosk | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [hierarchyOpen, setHierarchyOpen] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("kiosk-ui:hierarchy-open") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "kiosk-ui:hierarchy-open",
+        hierarchyOpen ? "1" : "0"
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [hierarchyOpen]);
+
+  const dashboardScope: DashboardScope = useMemo(() => {
+    if (selectedSiteId === "all") return { kind: "global" };
+    if (selectedDeptId !== "all")
+      return { kind: "department", departmentId: selectedDeptId };
+    return { kind: "site", siteId: selectedSiteId };
+  }, [selectedSiteId, selectedDeptId]);
+
+  const {
+    global: globalSummary,
+    site: siteSummary,
+    department: deptSummary,
+    issues,
+    loading: summaryLoading,
+  } = useDashboardScope(dashboardScope);
 
   useEffect(() => {
     if (org) setLastUpdated(new Date());
@@ -105,6 +129,14 @@ const OperationsPage: React.FC = () => {
     setSelectedDeptId(deptId);
   };
 
+  const selectKioskByName = (machineName: string) => {
+    if (!org) return;
+    const fresh = org.sites
+      .flatMap((s) => s.departments.flatMap((d) => d.kiosks))
+      .find((k) => k.machineName === machineName);
+    if (fresh) setSelectedKiosk(fresh);
+  };
+
   const visibleSites = useMemo(() => {
     if (!org) return [];
     return filterSites(
@@ -116,10 +148,22 @@ const OperationsPage: React.FC = () => {
     );
   }, [org, selectedSiteId, selectedDeptId, search, statusFilter]);
 
-  const summary = useMemo(
-    () => (org ? summarize(org.sites) : null),
-    [org]
+  const selectedSite = useMemo(
+    () =>
+      org && selectedSiteId !== "all"
+        ? org.sites.find((s) => s.id === selectedSiteId) ?? null
+        : null,
+    [org, selectedSiteId]
   );
+
+  const selectedDept = useMemo(() => {
+    if (!selectedSite || selectedDeptId === "all") return null;
+    return (
+      selectedSite.departments.find((d) => d.id === selectedDeptId) ?? null
+    );
+  }, [selectedSite, selectedDeptId]);
+
+  const scopeKind = dashboardScope.kind;
 
   const renderBody = () => {
     if (loading && !org) {
@@ -143,48 +187,155 @@ const OperationsPage: React.FC = () => {
     }
     if (!org) return null;
 
-    if (visibleSites.length === 0) {
+    if (scopeKind === "global") {
       return (
-        <StateView
-          variant="empty"
-          title="No matching kiosks"
-          message="Adjust filters or search to see more kiosks."
-        />
+        <>
+          <SummaryCards
+            scope="global"
+            global={globalSummary}
+            loading={summaryLoading}
+          />
+
+          {org.sites.length > 0 && (
+            <section className="site-grid">
+              {org.sites.map((s) => (
+                <SiteOverviewCard
+                  key={s.id}
+                  site={s}
+                  onSelect={() => handleSelectSite(s.id)}
+                />
+              ))}
+            </section>
+          )}
+
+          <IssuesPanel
+            title="Recent issues · all sites"
+            issues={issues}
+            loading={summaryLoading}
+            onSelectMachine={selectKioskByName}
+            emptyMessage="Global issues feed is only populated when you drill into a site."
+          />
+        </>
+      );
+    }
+
+    if (scopeKind === "site") {
+      return (
+        <>
+          <SummaryCards
+            scope="site"
+            site={siteSummary}
+            loading={summaryLoading}
+          />
+
+          {selectedSite && (
+            <section className="dept-summary-grid">
+              {selectedSite.departments.map((d) => {
+                const total = d.kiosks.length;
+                const online = d.kiosks.filter(
+                  (k) => k.status.toLowerCase() === "online"
+                ).length;
+                const isActive = selectedDeptId === d.id;
+                return (
+                  <button
+                    key={d.id}
+                    className={`dept-summary-card${
+                      isActive ? " is-active" : ""
+                    }`}
+                    onClick={() => handleSelectDept(selectedSite.id, d.id)}
+                  >
+                    <div className="dept-summary-card__name">{d.name}</div>
+                    <div className="dept-summary-card__stats">
+                      <span>
+                        <strong>{online}</strong>/{total} online
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </section>
+          )}
+
+          <IssuesPanel
+            title={`Issues · ${selectedSite?.name ?? "site"}`}
+            issues={issues}
+            loading={summaryLoading}
+            onSelectMachine={selectKioskByName}
+            emptyMessage="This site has no active issues right now."
+          />
+
+          {visibleSites.length === 0 ? (
+            <StateView
+              variant="empty"
+              title="No matching kiosks"
+              message="Adjust filters or search to see more kiosks."
+            />
+          ) : (
+            visibleSites.map((site) => (
+              <section key={site.id} className="site-block">
+                <header className="site-block__head">
+                  <div>
+                    <h2 className="site-block__title">{site.name}</h2>
+                    <div className="site-block__loc">{site.location}</div>
+                  </div>
+                </header>
+                {site.departments.map((d) => (
+                  <DepartmentSection
+                    key={d.id}
+                    department={d}
+                    selectedKioskId={selectedKiosk?.id ?? null}
+                    onSelectKiosk={setSelectedKiosk}
+                  />
+                ))}
+              </section>
+            ))
+          )}
+        </>
       );
     }
 
     return (
       <>
-        {selectedSiteId === "all" && (
-          <section className="site-grid">
-            {visibleSites.map((s) => (
-              <SiteOverviewCard
-                key={s.id}
-                site={s}
-                onSelect={() => handleSelectSite(s.id)}
-              />
-            ))}
-          </section>
-        )}
+        <SummaryCards
+          scope="department"
+          department={deptSummary}
+          loading={summaryLoading}
+        />
 
-        {visibleSites.map((site) => (
-          <section key={site.id} className="site-block">
-            <header className="site-block__head">
-              <div>
-                <h2 className="site-block__title">{site.name}</h2>
-                <div className="site-block__loc">{site.location}</div>
-              </div>
-            </header>
-            {site.departments.map((d) => (
-              <DepartmentSection
-                key={d.id}
-                department={d}
-                selectedKioskId={selectedKiosk?.id ?? null}
-                onSelectKiosk={setSelectedKiosk}
-              />
-            ))}
-          </section>
-        ))}
+        <IssuesPanel
+          title={`Issues · ${selectedDept?.name ?? "department"}`}
+          issues={issues}
+          loading={summaryLoading}
+          onSelectMachine={selectKioskByName}
+          emptyMessage="This department has no active issues right now."
+        />
+
+        {visibleSites.length === 0 ? (
+          <StateView
+            variant="empty"
+            title="No matching kiosks"
+            message="Adjust filters or search to see more kiosks."
+          />
+        ) : (
+          visibleSites.map((site) => (
+            <section key={site.id} className="site-block">
+              <header className="site-block__head">
+                <div>
+                  <h2 className="site-block__title">{site.name}</h2>
+                  <div className="site-block__loc">{site.location}</div>
+                </div>
+              </header>
+              {site.departments.map((d) => (
+                <DepartmentSection
+                  key={d.id}
+                  department={d}
+                  selectedKioskId={selectedKiosk?.id ?? null}
+                  onSelectKiosk={setSelectedKiosk}
+                />
+              ))}
+            </section>
+          ))
+        )}
       </>
     );
   };
@@ -232,15 +383,21 @@ const OperationsPage: React.FC = () => {
   }
 
   return (
-    <div className="ops-layout">
-      <Sidebar
-        org={org}
-        selectedSiteId={selectedSiteId}
-        selectedDepartmentId={selectedDeptId}
-        onSelectSite={handleSelectSite}
-        onSelectDepartment={handleSelectDept}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
+    <div
+      className={`ops-layout${
+        hierarchyOpen ? " ops-layout--with-hierarchy" : ""
+      }`}
+    >
+      {hierarchyOpen && (
+        <Sidebar
+          org={org}
+          selectedSiteId={selectedSiteId}
+          selectedDepartmentId={selectedDeptId}
+          onSelectSite={handleSelectSite}
+          onSelectDepartment={handleSelectDept}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+      )}
 
       <div className="ops-main">
         <Topbar
@@ -251,13 +408,12 @@ const OperationsPage: React.FC = () => {
           onRefresh={refresh}
           refreshing={loading}
           lastUpdated={lastUpdated}
+          sidePanelOpen={hierarchyOpen}
+          onToggleSidePanel={() => setHierarchyOpen((v) => !v)}
         />
 
         <div className="ops-content">
-          <div className="ops-content__main">
-            {summary && <SummaryCards summary={summary} />}
-            {renderBody()}
-          </div>
+          <div className="ops-content__main">{renderBody()}</div>
 
           {selectedKiosk && (
             <KioskDetailsPanel

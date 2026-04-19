@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Kiosk } from "../../types/org";
 import StatusBadge from "../StatusBadge";
-import CheckBadge from "./CheckBadge";
 import CommandHistory from "./CommandHistory";
 import { createCommand } from "../../api/actions";
 import { fetchCommands } from "../../api/commands";
@@ -10,6 +9,7 @@ import { CommandType, KioskCommand } from "../../types/command";
 import { MachineLog } from "../../types/log";
 import { useCan } from "../../context/PermissionsContext";
 import { RealtimeEvents, subscribeRealtime } from "../../realtime/events";
+import { useKioskDetails } from "../../hooks/useKioskDetails";
 
 interface KioskDetailsPanelProps {
   kiosk: Kiosk;
@@ -39,12 +39,29 @@ type ActionState =
 const COMMANDS_POLL_MS = 5000;
 const LOGS_POLL_MS = 5000;
 const LOGS_PREVIEW_COUNT = 15;
+const ALERTS_PREVIEW_COUNT = 10;
 
-const formatDate = (iso: string | null): string => {
+const formatDate = (iso: string | null | undefined): string => {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+};
+
+const formatRelative = (iso: string | null | undefined): string => {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "—";
+  const diff = Math.max(0, Date.now() - t);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
 };
 
 const formatLogTime = (iso: string): string => {
@@ -67,9 +84,16 @@ const levelToVariant = (level: string): string => {
   return "neutral";
 };
 
-const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose }) => {
+const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
+  kiosk,
+  onClose,
+}) => {
   const can = useCan();
   const [actionState, setActionState] = useState<ActionState>({ kind: "idle" });
+
+  const { overview, alerts, loading: overviewLoading } = useKioskDetails(
+    kiosk.machineName
+  );
 
   const [commands, setCommands] = useState<KioskCommand[]>([]);
   const [commandsLoading, setCommandsLoading] = useState<boolean>(true);
@@ -172,13 +196,120 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
     return <div className={cls}>{text}</div>;
   };
 
+  const displayStatus = overview?.status ?? kiosk.status;
+  const displayIp = overview?.ipAddress || kiosk.ipAddress;
+  const displayLastSeen = overview?.lastSeen ?? kiosk.lastSeen;
+  const siteLabel = overview?.siteName ?? "—";
+  const departmentLabel = overview?.departmentName ?? "—";
+  const activeAlerts = overview?.activeAlertsCount ?? 0;
+  const failedCommands24h = overview?.failedCommandsLast24h ?? 0;
+  const logsCount24h = overview?.logsCountLast24h ?? 0;
+
+  const renderOverview = () => (
+    <section className="details-panel__section">
+      <div className="details-panel__section-title">Overview</div>
+      <div className="details-panel__meta">
+        <div>
+          <div className="details-panel__label">Status</div>
+          <StatusBadge status={displayStatus} />
+        </div>
+        <div>
+          <div className="details-panel__label">IP Address</div>
+          <div className="details-panel__value details-panel__value--mono">
+            {displayIp || "—"}
+          </div>
+        </div>
+        <div>
+          <div className="details-panel__label">Last Seen</div>
+          <div className="details-panel__value">
+            {formatDate(displayLastSeen)}
+          </div>
+          <div className="details-panel__sublabel">
+            {formatRelative(displayLastSeen)}
+          </div>
+        </div>
+      </div>
+
+      <div className="details-panel__kv details-panel__kv--compact">
+        <div>
+          <div className="details-panel__label">Site</div>
+          <div className="details-panel__value">{siteLabel}</div>
+        </div>
+        <div>
+          <div className="details-panel__label">Department</div>
+          <div className="details-panel__value">{departmentLabel}</div>
+        </div>
+      </div>
+
+      <div className="kiosk-counters">
+        <div
+          className={`kiosk-counter${
+            activeAlerts > 0 ? " kiosk-counter--alert" : ""
+          }`}
+        >
+          <div className="kiosk-counter__value">
+            {overviewLoading && !overview ? "—" : activeAlerts}
+          </div>
+          <div className="kiosk-counter__label">Active alerts</div>
+        </div>
+        <div
+          className={`kiosk-counter${
+            failedCommands24h > 0 ? " kiosk-counter--warn" : ""
+          }`}
+        >
+          <div className="kiosk-counter__value">
+            {overviewLoading && !overview ? "—" : failedCommands24h}
+          </div>
+          <div className="kiosk-counter__label">Failed cmds · 24h</div>
+        </div>
+        <div className="kiosk-counter">
+          <div className="kiosk-counter__value">
+            {overviewLoading && !overview ? "—" : logsCount24h}
+          </div>
+          <div className="kiosk-counter__label">Log entries · 24h</div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderRecentAlerts = () => {
+    if (overviewLoading && alerts.length === 0 && !overview) {
+      return (
+        <div className="details-panel__hint">Loading alerts...</div>
+      );
+    }
+    if (alerts.length === 0) {
+      return (
+        <div className="details-panel__hint">
+          No alerts recorded for this kiosk.
+        </div>
+      );
+    }
+    const preview = alerts.slice(0, ALERTS_PREVIEW_COUNT);
+    return (
+      <ul className="kiosk-alerts">
+        {preview.map((a) => (
+          <li key={a.id} className="kiosk-alerts__row">
+            <div className="kiosk-alerts__head">
+              <span className="kiosk-alerts__type">{a.type}</span>
+              <span className="kiosk-alerts__time">
+                {formatRelative(a.createdAt)}
+              </span>
+            </div>
+            <div className="kiosk-alerts__msg">{a.message}</div>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
   const renderLogs = () => {
     if (logsLoading && logs.length === 0) {
-      return <div className="cmd-history__hint">Loading logs...</div>;
+      return <div className="details-panel__hint">Loading logs...</div>;
     }
     if (logsError) {
       return (
-        <div className="cmd-history__hint cmd-history__hint--error">
+        <div className="details-panel__hint details-panel__hint--error">
           <span>{logsError}</span>
           <button className="btn btn--ghost" onClick={loadLogs}>
             Retry
@@ -187,27 +318,24 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
       );
     }
     if (logs.length === 0) {
-      return <div className="cmd-history__hint">No logs for this machine.</div>;
+      return (
+        <div className="details-panel__hint">No logs for this machine.</div>
+      );
     }
     const preview = logs.slice(0, LOGS_PREVIEW_COUNT);
     return (
-      <ul className="cmd-history">
+      <ul className="kiosk-logs">
         {preview.map((log, idx) => (
-          <li
-            key={`${log.timestamp}-${idx}`}
-            className="cmd-history__row"
-          >
-            <div className="cmd-history__main">
+          <li key={`${log.timestamp}-${idx}`} className="kiosk-logs__row">
+            <div className="kiosk-logs__main">
               <span
                 className={`log-level log-level--${levelToVariant(log.level)}`}
               >
                 {log.level}
               </span>
-              <span className="cmd-history__type">{log.message}</span>
+              <span className="kiosk-logs__msg">{log.message}</span>
             </div>
-            <div className="cmd-history__meta">
-              <span>{formatLogTime(log.timestamp)}</span>
-            </div>
+            <div className="kiosk-logs__meta">{formatLogTime(log.timestamp)}</div>
           </li>
         ))}
       </ul>
@@ -230,100 +358,45 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
         </button>
       </header>
 
+      {renderOverview()}
+
       <section className="details-panel__section">
-        <div className="details-panel__meta">
-          <div>
-            <div className="details-panel__label">Status</div>
-            <StatusBadge status={kiosk.status} />
-          </div>
-          <div>
-            <div className="details-panel__label">IP Address</div>
-            <div className="details-panel__value details-panel__value--mono">
-              {kiosk.ipAddress}
-            </div>
-          </div>
-          <div>
-            <div className="details-panel__label">Last Seen</div>
-            <div className="details-panel__value">{formatDate(kiosk.lastSeen)}</div>
-          </div>
+        <div className="details-panel__section-title">
+          Recent alerts
+          <span className="details-panel__section-count">
+            {overviewLoading && !overview ? "—" : alerts.length}
+          </span>
         </div>
+        {renderRecentAlerts()}
       </section>
 
       <section className="details-panel__section">
-        <div className="details-panel__section-title">Checks</div>
-        <div className="details-panel__checks">
-          {kiosk.checks.map((c) => (
-            <CheckBadge key={c.kind} check={c} />
-          ))}
+        <div className="details-panel__section-title">
+          Recent logs
+          <span className="details-panel__section-count">
+            {logsLoading && logs.length === 0 ? "—" : logs.length}
+          </span>
         </div>
+        {renderLogs()}
       </section>
 
       <section className="details-panel__section">
-        <div className="details-panel__section-title">GPO</div>
-        <div className="details-panel__kv">
-          <div>
-            <div className="details-panel__label">Last applied</div>
-            <div className="details-panel__value">{formatDate(kiosk.gpo.lastApplied)}</div>
-          </div>
-          <div>
-            <div className="details-panel__label">Version</div>
-            <div className="details-panel__value details-panel__value--mono">
-              {kiosk.gpo.version}
-            </div>
-          </div>
+        <div className="details-panel__section-title">
+          Command history
+          <span className="details-panel__section-count">
+            {commandsLoading && commands.length === 0 ? "—" : commands.length}
+          </span>
         </div>
+        <CommandHistory
+          commands={commands}
+          loading={commandsLoading}
+          error={commandsError}
+          onRetry={loadCommands}
+        />
       </section>
 
       <section className="details-panel__section">
-        <div className="details-panel__section-title">Browser / App</div>
-        <div className="details-panel__kv">
-          <div>
-            <div className="details-panel__label">Name</div>
-            <div className="details-panel__value">{kiosk.browser.name}</div>
-          </div>
-          <div>
-            <div className="details-panel__label">Version</div>
-            <div className="details-panel__value details-panel__value--mono">
-              {kiosk.browser.version}
-            </div>
-          </div>
-          <div>
-            <div className="details-panel__label">Running</div>
-            <div className="details-panel__value">
-              {kiosk.browser.running ? "Yes" : "No"}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">Network</div>
-        <div className="details-panel__kv">
-          <div>
-            <div className="details-panel__label">Gateway</div>
-            <div className="details-panel__value details-panel__value--mono">
-              {kiosk.network.gateway}
-            </div>
-          </div>
-          <div>
-            <div className="details-panel__label">DNS</div>
-            <div className="details-panel__value details-panel__value--mono">
-              {kiosk.network.dns}
-            </div>
-          </div>
-          <div>
-            <div className="details-panel__label">Latency</div>
-            <div className="details-panel__value">
-              {kiosk.network.latencyMs != null
-                ? `${kiosk.network.latencyMs} ms`
-                : "—"}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">Actions</div>
+        <div className="details-panel__section-title">Quick actions</div>
         <div className="details-panel__actions">
           {ACTIONS.map((a) => {
             const activeForThis =
@@ -359,21 +432,6 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({ kiosk, onClose })
           </div>
         )}
         {renderFeedback()}
-      </section>
-
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">Command history</div>
-        <CommandHistory
-          commands={commands}
-          loading={commandsLoading}
-          error={commandsError}
-          onRetry={loadCommands}
-        />
-      </section>
-
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">Logs</div>
-        {renderLogs()}
       </section>
     </aside>
   );
