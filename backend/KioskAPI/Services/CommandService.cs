@@ -104,4 +104,21 @@ public class CommandService : ICommandService
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
     }
+
+    public async Task<IEnumerable<Command>> GetRecentAsync(int limit = 100, string? status = null, CancellationToken ct = default)
+    {
+        if (limit <= 0) limit = 100;
+        if (limit > 500) limit = 500;
+
+        var query = _db.Commands.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(c => c.Status == status);
+        }
+
+        return await query
+            .OrderByDescending(c => c.CreatedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+    }
 }

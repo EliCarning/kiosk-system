@@ -256,6 +256,11 @@ app.MapGet("/api/commands/{machineName}", async (string machineName, ICommandSer
     Results.Ok(await service.GetByMachineAsync(machineName)))
     .RequireAuthorization(KioskPolicies.RequireViewer);
 
+app.MapGet("/api/commands",
+    async (ICommandService service, string? status, int? limit, CancellationToken ct) =>
+        Results.Ok(await service.GetRecentAsync(limit ?? 100, status, ct)))
+    .RequireAuthorization(KioskPolicies.RequireViewer);
+
 app.MapGet("/api/alerts", async (IAlertService service, CancellationToken ct) =>
     Results.Ok(await service.GetActiveAsync(ct)))
     .RequireAuthorization(KioskPolicies.RequireViewer);
