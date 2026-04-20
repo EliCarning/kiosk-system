@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useOrganization } from "../hooks/useOrganization";
 import { createCommand } from "../api/actions";
 import { Kiosk } from "../types/org";
@@ -18,6 +18,9 @@ const BULK_ACTIONS: BulkActionDef[] = [
   { type: "refresh_cache", label: "Refresh Cache" },
   { type: "restart_service", label: "Restart Service" },
   { type: "restart_browser", label: "Restart Browser" },
+  { type: "collect_system_info", label: "Collect System Info" },
+  { type: "collect_event_logs", label: "Collect Event Logs" },
+  { type: "restart_agent", label: "Restart Agent", requiresConfirm: true },
   { type: "reboot", label: "Reboot", danger: true, requiresConfirm: true },
 ];
 
@@ -48,9 +51,14 @@ const KiosksPage: React.FC = () => {
   const navigate = useNavigate();
   const { org, loading, error, refresh } = useOrganization();
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const statusFilter = (searchParams.get("status") as StatusFilter) ?? "all";
+  const setStatusFilter = (s: StatusFilter) => {
+    if (s === "all") setSearchParams({});
+    else setSearchParams({ status: s });
+  };
   const [executing, setExecuting] = useState<CommandType | null>(null);
   const [result, setResult] = useState<BulkResult | null>(null);
 

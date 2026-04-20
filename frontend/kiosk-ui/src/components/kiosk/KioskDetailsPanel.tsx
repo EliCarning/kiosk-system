@@ -12,13 +12,15 @@ import KioskOverviewTab from "./KioskOverviewTab";
 import KioskCommandsTab from "./KioskCommandsTab";
 import KioskLogsTab from "./KioskLogsTab";
 import KioskAlertsTab from "./KioskAlertsTab";
+import KioskSystemInfoTab from "./KioskSystemInfoTab";
+import KioskEventLogsTab from "./KioskEventLogsTab";
 
 interface KioskDetailsPanelProps {
   kiosk: Kiosk;
   onClose: () => void;
 }
 
-type TabId = "overview" | "commands" | "logs" | "alerts";
+type TabId = "overview" | "commands" | "logs" | "alerts" | "system-info" | "event-logs";
 
 const COMMANDS_POLL_MS = 5000;
 const LOGS_POLL_MS = 5000;
@@ -31,7 +33,9 @@ const loadLastTab = (machineName: string): TabId => {
       raw === "overview" ||
       raw === "commands" ||
       raw === "logs" ||
-      raw === "alerts"
+      raw === "alerts" ||
+      raw === "system-info" ||
+      raw === "event-logs"
     )
       return raw;
   } catch {
@@ -52,9 +56,7 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
   kiosk,
   onClose,
 }) => {
-  const { overview, loading: overviewLoading } = useKioskDetails(
-    kiosk.machineName
-  );
+  const { overview, loading: overviewLoading } = useKioskDetails(kiosk.machineName);
 
   const [activeTab, setActiveTab] = useState<TabId>(() =>
     loadLastTab(kiosk.machineName)
@@ -138,14 +140,20 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
     loadCommands
   );
 
-  const handleAction = async (type: CommandType, label: string) => {
+  const handleAction = async (type: CommandType, label: string, payload?: string) => {
     if (type === "reboot") {
       const ok = window.confirm(
         `Reboot ${kiosk.machineName}? This will restart the machine.`
       );
       if (!ok) return;
     }
-    await trigger(type, label);
+    if (type === "restart_agent") {
+      const ok = window.confirm(
+        `Restart the agent service on ${kiosk.machineName}? The agent will reconnect automatically.`
+      );
+      if (!ok) return;
+    }
+    await trigger(type, label, payload);
   };
 
   const activeAlertCount = overview?.activeAlertsCount ?? 0;
@@ -166,6 +174,8 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
       label: "Alerts",
       badge: activeAlertCount > 0 ? activeAlertCount : undefined,
     },
+    { id: "system-info", label: "System Info" },
+    { id: "event-logs", label: "Event Logs" },
   ];
 
   return (
@@ -222,6 +232,22 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
         )}
         {activeTab === "alerts" && (
           <KioskAlertsTab machineName={kiosk.machineName} />
+        )}
+        {activeTab === "system-info" && (
+          <KioskSystemInfoTab
+            machineName={kiosk.machineName}
+            pending={pending}
+            feedback={feedback}
+            onTrigger={handleAction}
+          />
+        )}
+        {activeTab === "event-logs" && (
+          <KioskEventLogsTab
+            machineName={kiosk.machineName}
+            pending={pending}
+            feedback={feedback}
+            onTrigger={handleAction}
+          />
         )}
       </div>
     </aside>

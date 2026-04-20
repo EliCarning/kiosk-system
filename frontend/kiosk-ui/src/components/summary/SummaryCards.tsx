@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import SummaryCard from "../SummaryCard";
 import {
   DepartmentSummary,
@@ -11,38 +12,45 @@ type Kpi = {
   value: number | string;
   hint?: string;
   accent?: "default" | "online" | "offline" | "warning";
+  onClick?: () => void;
 };
 
 const healthPct = (online: number, total: number): number =>
   total === 0 ? 0 : Math.round((online / total) * 100);
 
-const globalKpis = (s: GlobalSummary): Kpi[] => [
+type Nav = ReturnType<typeof useNavigate>;
+
+const globalKpis = (s: GlobalSummary, nav: Nav): Kpi[] => [
   {
     label: "Total kiosks",
     value: s.totalKiosks,
     hint: `${s.totalSites} sites · ${s.totalDepartments} departments`,
+    onClick: () => nav("/kiosks"),
   },
   {
     label: "Online",
     value: s.onlineKiosks,
     accent: "online",
     hint: `${healthPct(s.onlineKiosks, s.totalKiosks)}% online`,
+    onClick: () => nav("/kiosks?status=online"),
   },
   {
     label: "Offline",
     value: s.offlineKiosks,
     accent: s.offlineKiosks > 0 ? "offline" : "default",
     hint: s.offlineKiosks > 0 ? "Needs attention" : "All reachable",
+    onClick: () => nav("/kiosks?status=offline"),
   },
   {
     label: "Active alerts",
     value: s.activeAlerts,
     accent: s.activeAlerts > 0 ? "offline" : "default",
     hint: `${s.failedCommandsLast24h} failed cmds · 24h`,
+    onClick: () => nav("/alerts"),
   },
 ];
 
-const siteKpis = (s: SiteSummary): Kpi[] => [
+const siteKpis = (s: SiteSummary, nav: Nav): Kpi[] => [
   {
     label: "Kiosks",
     value: s.totalKiosks,
@@ -58,16 +66,18 @@ const siteKpis = (s: SiteSummary): Kpi[] => [
     label: "Offline",
     value: s.offlineKiosks,
     accent: s.offlineKiosks > 0 ? "offline" : "default",
+    onClick: s.offlineKiosks > 0 ? () => nav("/kiosks?status=offline") : undefined,
   },
   {
     label: "Active alerts",
     value: s.activeAlerts,
     accent: s.activeAlerts > 0 ? "offline" : "default",
     hint: `${s.failedCommandsLast24h} failed cmds · 24h`,
+    onClick: s.activeAlerts > 0 ? () => nav("/alerts") : undefined,
   },
 ];
 
-const deptKpis = (d: DepartmentSummary): Kpi[] => [
+const deptKpis = (d: DepartmentSummary, nav: Nav): Kpi[] => [
   {
     label: "Kiosks",
     value: d.totalKiosks,
@@ -82,12 +92,14 @@ const deptKpis = (d: DepartmentSummary): Kpi[] => [
     label: "Offline",
     value: d.offlineKiosks,
     accent: d.offlineKiosks > 0 ? "offline" : "default",
+    onClick: d.offlineKiosks > 0 ? () => nav("/kiosks?status=offline") : undefined,
   },
   {
     label: "Active alerts",
     value: d.activeAlerts,
     accent: d.activeAlerts > 0 ? "offline" : "default",
     hint: `${d.failedCommandsLast24h} failed cmds · 24h`,
+    onClick: d.activeAlerts > 0 ? () => nav("/alerts") : undefined,
   },
 ];
 
@@ -108,10 +120,12 @@ const SummaryCards: React.FC<Props> = ({
   loading,
   commandsInProgress,
 }) => {
+  const navigate = useNavigate();
+
   let cards: Kpi[] = [];
-  if (scope === "global" && global) cards = globalKpis(global);
-  else if (scope === "site" && site) cards = siteKpis(site);
-  else if (scope === "department" && department) cards = deptKpis(department);
+  if (scope === "global" && global) cards = globalKpis(global, navigate);
+  else if (scope === "site" && site) cards = siteKpis(site, navigate);
+  else if (scope === "department" && department) cards = deptKpis(department, navigate);
 
   if (typeof commandsInProgress === "number") {
     cards = [
@@ -124,6 +138,7 @@ const SummaryCards: React.FC<Props> = ({
           commandsInProgress > 0
             ? "Pending or running"
             : "No active dispatches",
+        onClick: commandsInProgress > 0 ? () => navigate("/commands") : undefined,
       },
     ];
   }
@@ -155,6 +170,7 @@ const SummaryCards: React.FC<Props> = ({
           value={k.value}
           accent={k.accent ?? "default"}
           hint={k.hint}
+          onClick={k.onClick}
         />
       ))}
     </section>

@@ -19,7 +19,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
         "Connection string 'DefaultConnection' not configured.");
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connectionString));
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<IMachineService, MachineService>();
 builder.Services.AddScoped<ILogService, LogService>();
@@ -514,6 +514,156 @@ app.MapGet("/api/kiosks/{machineName}/event-logs",
         return Results.Ok(entries);
     }).RequireAuthorization(KioskPolicies.RequireViewer);
 
+// ── RDP Sessions ─────────────────────────────────────────────────────────────
+
+app.MapPost("/api/rdp-sessions", async (HttpContext ctx, RdpSessionBatch batch, AppDbContext db, CancellationToken ct) =>
+{
+    var denied = RequireAgentKey(ctx);
+    if (denied is not null) return denied;
+
+    if (string.IsNullOrWhiteSpace(batch.MachineName))
+        return Results.BadRequest("machineName is required");
+
+    var collectedAt = DateTime.UtcNow;
+
+    var existing = db.RdpSessions.Where(r => r.MachineName == batch.MachineName);
+    db.RdpSessions.RemoveRange(existing);
+
+    if (batch.Sessions is { Count: > 0 })
+    {
+        var sessions = batch.Sessions.Select(s => new RdpSession
+        {
+            Id = Guid.NewGuid(),
+            MachineName = batch.MachineName,
+            Username = s.Username,
+            SessionName = s.SessionName ?? string.Empty,
+            State = s.State,
+            LoginTime = s.LoginTime,
+            CollectedAt = collectedAt
+        }).ToList();
+        db.RdpSessions.AddRange(sessions);
+    }
+
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { saved = batch.Sessions?.Count ?? 0 });
+}).AllowAnonymous();
+
+app.MapGet("/api/kiosks/{machineName}/rdp-sessions",
+    async (string machineName, AppDbContext db, CancellationToken ct) =>
+    {
+        var sessions = await db.RdpSessions
+            .AsNoTracking()
+            .Where(r => r.MachineName == machineName)
+            .OrderBy(r => r.Username)
+            .ToListAsync(ct);
+        return Results.Ok(sessions);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapGet("/api/kiosks/{machineName}/rdp-events",
+    async (string machineName, int? limit, AppDbContext db, CancellationToken ct) =>
+    {
+        var take = Math.Clamp(limit ?? 100, 1, 500);
+        var rdpEventIds = new[] { 4624, 4634, 4778, 4779 };
+        var entries = await db.EventLogEntries
+            .AsNoTracking()
+            .Where(e => e.MachineName == machineName
+                     && e.LogName == "Security"
+                     && rdpEventIds.Contains(e.EventId))
+            .OrderByDescending(e => e.Timestamp)
+            .Take(take)
+            .ToListAsync(ct);
+        return Results.Ok(entries);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+// ── Windows Services ──────────────────────────────────────────────────────────
+
+app.MapPost("/api/services", async (HttpContext ctx, WindowsServiceBatch batch, AppDbContext db, CancellationToken ct) =>
+{
+    var denied = RequireAgentKey(ctx);
+    if (denied is not null) return denied;
+
+    if (string.IsNullOrWhiteSpace(batch.MachineName))
+        return Results.BadRequest("machineName is required");
+
+    var collectedAt = DateTime.UtcNow;
+
+    var existing = db.WindowsServices.Where(s => s.MachineName == batch.MachineName);
+    db.WindowsServices.RemoveRange(existing);
+
+    if (batch.Services is { Count: > 0 })
+    {
+        var services = batch.Services.Select(s => new WindowsService
+        {
+            Id = Guid.NewGuid(),
+            MachineName = batch.MachineName,
+            ServiceName = s.ServiceName,
+            DisplayName = s.DisplayName,
+            Status = s.Status,
+            StartType = s.StartType,
+            CollectedAt = collectedAt
+        }).ToList();
+        db.WindowsServices.AddRange(services);
+    }
+
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { saved = batch.Services?.Count ?? 0 });
+}).AllowAnonymous();
+
+app.MapGet("/api/kiosks/{machineName}/services",
+    async (string machineName, AppDbContext db, CancellationToken ct) =>
+    {
+        var services = await db.WindowsServices
+            .AsNoTracking()
+            .Where(s => s.MachineName == machineName)
+            .OrderBy(s => s.ServiceName)
+            .ToListAsync(ct);
+        return Results.Ok(services);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+// ── Windows Processes ─────────────────────────────────────────────────────────
+
+app.MapPost("/api/processes", async (HttpContext ctx, WindowsProcessBatch batch, AppDbContext db, CancellationToken ct) =>
+{
+    var denied = RequireAgentKey(ctx);
+    if (denied is not null) return denied;
+
+    if (string.IsNullOrWhiteSpace(batch.MachineName))
+        return Results.BadRequest("machineName is required");
+
+    var collectedAt = DateTime.UtcNow;
+
+    var existing = db.WindowsProcesses.Where(p => p.MachineName == batch.MachineName);
+    db.WindowsProcesses.RemoveRange(existing);
+
+    if (batch.Processes is { Count: > 0 })
+    {
+        var processes = batch.Processes.Select(p => new WindowsProcess
+        {
+            Id = Guid.NewGuid(),
+            MachineName = batch.MachineName,
+            ProcessName = p.ProcessName,
+            Pid = p.Pid,
+            MemoryMb = p.MemoryMb,
+            CollectedAt = collectedAt
+        }).ToList();
+        db.WindowsProcesses.AddRange(processes);
+    }
+
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { saved = batch.Processes?.Count ?? 0 });
+}).AllowAnonymous();
+
+app.MapGet("/api/kiosks/{machineName}/processes",
+    async (string machineName, AppDbContext db, CancellationToken ct) =>
+    {
+        var processes = await db.WindowsProcesses
+            .AsNoTracking()
+            .Where(p => p.MachineName == machineName)
+            .OrderByDescending(p => p.MemoryMb)
+            .ToListAsync(ct);
+        return Results.Ok(processes);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
 app.MapHub<KioskHub>("/hubs/kiosk");
 
 app.Run();
@@ -529,3 +679,12 @@ public record EventLogEntryDto(
     DateTime Timestamp);
 
 public record EventLogBatch(string MachineName, List<EventLogEntryDto> Entries);
+
+public record RdpSessionDto(string Username, string? SessionName, string State, DateTime? LoginTime);
+public record RdpSessionBatch(string MachineName, List<RdpSessionDto>? Sessions);
+
+public record WindowsServiceDto(string ServiceName, string DisplayName, string Status, string StartType);
+public record WindowsServiceBatch(string MachineName, List<WindowsServiceDto>? Services);
+
+public record WindowsProcessDto(string ProcessName, int Pid, long MemoryMb);
+public record WindowsProcessBatch(string MachineName, List<WindowsProcessDto>? Processes);

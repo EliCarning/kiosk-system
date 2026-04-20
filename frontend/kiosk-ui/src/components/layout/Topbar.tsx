@@ -3,6 +3,11 @@ import AlertsIndicator from "../alerts/AlertsIndicator";
 
 export type StatusFilter = "all" | "online" | "offline" | "warning";
 
+interface SiteOption {
+  id: string;
+  name: string;
+}
+
 interface TopbarProps {
   search: string;
   onSearchChange: (s: string) => void;
@@ -15,6 +20,9 @@ interface TopbarProps {
   onToggleSidePanel?: () => void;
   editDashboardActive?: boolean;
   onEditDashboard?: () => void;
+  sites?: SiteOption[];
+  selectedSiteId?: string | "all";
+  onSiteChange?: (siteId: string | "all") => void;
 }
 
 const statusOptions: { value: StatusFilter; label: string }[] = [
@@ -53,6 +61,9 @@ const Topbar: React.FC<TopbarProps> = ({
   onToggleSidePanel,
   editDashboardActive,
   onEditDashboard,
+  sites,
+  selectedSiteId,
+  onSiteChange,
 }) => {
   return (
     <div className="topbar">
@@ -71,6 +82,24 @@ const Topbar: React.FC<TopbarProps> = ({
             <span>Hierarchy</span>
           </button>
         )}
+
+        {sites && sites.length > 0 && onSiteChange && (
+          <select
+            className="input topbar__site-select"
+            value={selectedSiteId ?? "all"}
+            onChange={(e) => onSiteChange(e.target.value as string | "all")}
+            aria-label="Filter by site"
+          >
+            <option value="all">All sites</option>
+            <option value="unassigned">Unassigned</option>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
+
         <input
           type="search"
           className="input"

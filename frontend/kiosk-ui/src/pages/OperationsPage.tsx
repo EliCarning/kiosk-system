@@ -26,6 +26,7 @@ import {
 import { Kiosk, Site } from "../types/org";
 import { usePermissions } from "../context/PermissionsContext";
 import { useDashboardPrefs, DashboardPrefs } from "../hooks/useDashboardPrefs";
+import AttentionBanner from "../components/summary/AttentionBanner";
 
 const matchesSearch = (kiosk: Kiosk, q: string): boolean => {
   if (!q) return true;
@@ -295,6 +296,14 @@ const OperationsPage: React.FC = () => {
             />
           )}
 
+          {globalSummary && (
+            <AttentionBanner
+              offlineKiosks={globalSummary.offlineKiosks}
+              activeAlerts={globalSummary.activeAlerts}
+              failedCommands24h={globalSummary.failedCommandsLast24h}
+            />
+          )}
+
           {prefs.showSiteGrid && org.sites.length > 0 && (
             <section className="site-grid">
               {org.sites.map((s) => (
@@ -525,6 +534,9 @@ const OperationsPage: React.FC = () => {
           onToggleSidePanel={() => setHierarchyOpen((v) => !v)}
           editDashboardActive={editMode}
           onEditDashboard={scopeKind === "global" ? () => setEditMode((v) => !v) : undefined}
+          sites={org?.sites.map((s) => ({ id: s.id, name: s.name })) ?? []}
+          selectedSiteId={selectedSiteId}
+          onSiteChange={handleSelectSite}
         />
 
         <div className="ops-content">

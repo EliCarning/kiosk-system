@@ -15,6 +15,9 @@ const ACTIONS: ActionDef[] = [
   { type: "refresh_cache", label: "Refresh Cache" },
   { type: "restart_service", label: "Restart Service" },
   { type: "restart_browser", label: "Restart Browser" },
+  { type: "collect_system_info", label: "Collect System Info" },
+  { type: "collect_event_logs", label: "Collect Event Logs" },
+  { type: "restart_agent", label: "Restart Agent" },
   { type: "reboot", label: "Reboot", danger: true },
 ];
 

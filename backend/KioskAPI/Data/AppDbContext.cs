@@ -17,6 +17,9 @@ public class AppDbContext : DbContext
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<SystemInfo> SystemInfoSnapshots => Set<SystemInfo>();
     public DbSet<EventLogEntry> EventLogEntries => Set<EventLogEntry>();
+    public DbSet<RdpSession> RdpSessions => Set<RdpSession>();
+    public DbSet<WindowsService> WindowsServices => Set<WindowsService>();
+    public DbSet<WindowsProcess> WindowsProcesses => Set<WindowsProcess>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -93,6 +96,7 @@ public class AppDbContext : DbContext
             entity.Property(s => s.IpAddress).HasMaxLength(64);
             entity.Property(s => s.Uptime).HasMaxLength(100);
             entity.Property(s => s.CurrentUser).HasMaxLength(200);
+            entity.Property(s => s.DiskSummary).HasMaxLength(1000);
             entity.HasIndex(s => new { s.MachineName, s.CollectedAt });
         });
 
@@ -106,6 +110,35 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Message).IsRequired();
             entity.HasIndex(e => new { e.MachineName, e.CollectedAt });
             entity.HasIndex(e => e.Timestamp);
+        });
+
+        modelBuilder.Entity<RdpSession>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.Property(r => r.MachineName).IsRequired().HasMaxLength(200);
+            entity.Property(r => r.Username).IsRequired().HasMaxLength(200);
+            entity.Property(r => r.SessionName).HasMaxLength(100);
+            entity.Property(r => r.State).IsRequired().HasMaxLength(32);
+            entity.HasIndex(r => new { r.MachineName, r.CollectedAt });
+        });
+
+        modelBuilder.Entity<WindowsService>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.MachineName).IsRequired().HasMaxLength(200);
+            entity.Property(s => s.ServiceName).IsRequired().HasMaxLength(200);
+            entity.Property(s => s.DisplayName).IsRequired().HasMaxLength(300);
+            entity.Property(s => s.Status).IsRequired().HasMaxLength(32);
+            entity.Property(s => s.StartType).IsRequired().HasMaxLength(32);
+            entity.HasIndex(s => new { s.MachineName, s.CollectedAt });
+        });
+
+        modelBuilder.Entity<WindowsProcess>(entity =>
+        {
+            entity.HasKey(p => p.Id);
+            entity.Property(p => p.MachineName).IsRequired().HasMaxLength(200);
+            entity.Property(p => p.ProcessName).IsRequired().HasMaxLength(200);
+            entity.HasIndex(p => new { p.MachineName, p.CollectedAt });
         });
     }
 }
