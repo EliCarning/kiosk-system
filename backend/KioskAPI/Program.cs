@@ -666,6 +666,29 @@ app.MapGet("/api/kiosks/{machineName}/processes",
 
 app.MapHub<KioskHub>("/hubs/kiosk");
 
+// Dashboard layout persistence (file-based per user)
+var layoutDir = Path.Combine(AppContext.BaseDirectory, "dashboard-layouts");
+Directory.CreateDirectory(layoutDir);
+
+app.MapGet("/api/dashboard/layout", (HttpContext ctx) =>
+{
+    var username = CurrentUser.From(ctx.User).Username ?? "default";
+    var safe = string.Concat(username.Select(c => char.IsLetterOrDigit(c) ? c : '_'));
+    var path = Path.Combine(layoutDir, $"{safe}.json");
+    if (!File.Exists(path)) return Results.Ok(new { layout = (string?)null });
+    var layout = File.ReadAllText(path);
+    return Results.Ok(new { layout });
+}).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapPost("/api/dashboard/layout", async (SaveLayoutRequest req, HttpContext ctx) =>
+{
+    var username = CurrentUser.From(ctx.User).Username ?? "default";
+    var safe = string.Concat(username.Select(c => char.IsLetterOrDigit(c) ? c : '_'));
+    var path = Path.Combine(layoutDir, $"{safe}.json");
+    await File.WriteAllTextAsync(path, req.Layout ?? string.Empty);
+    return Results.Ok();
+}).RequireAuthorization(KioskPolicies.RequireViewer);
+
 app.Run();
 
 public record AssignKioskRequest(Guid? SiteId, Guid? DepartmentId);
@@ -688,3 +711,5 @@ public record WindowsServiceBatch(string MachineName, List<WindowsServiceDto>? S
 
 public record WindowsProcessDto(string ProcessName, int Pid, long MemoryMb);
 public record WindowsProcessBatch(string MachineName, List<WindowsProcessDto>? Processes);
+
+public record SaveLayoutRequest(string? Layout);
