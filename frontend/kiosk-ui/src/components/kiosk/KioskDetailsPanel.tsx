@@ -1,98 +1,56 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Kiosk } from "../../types/org";
-import StatusBadge from "../StatusBadge";
-import CommandHistory from "./CommandHistory";
-import { createCommand } from "../../api/actions";
 import { fetchCommands } from "../../api/commands";
 import { fetchMachineLogs } from "../../api/logs";
 import { CommandType, KioskCommand } from "../../types/command";
 import { MachineLog } from "../../types/log";
-import { useCan } from "../../context/PermissionsContext";
 import { RealtimeEvents, subscribeRealtime } from "../../realtime/events";
 import { useKioskDetails } from "../../hooks/useKioskDetails";
+import { useKioskActions } from "../../hooks/useKioskActions";
+import Tabs, { TabDef } from "../Tabs";
+import KioskOverviewTab from "./KioskOverviewTab";
+import KioskCommandsTab from "./KioskCommandsTab";
+import KioskLogsTab from "./KioskLogsTab";
 
 interface KioskDetailsPanelProps {
   kiosk: Kiosk;
   onClose: () => void;
 }
 
-interface ActionDef {
-  type: CommandType;
-  label: string;
-  danger?: boolean;
-}
-
-const ACTIONS: ActionDef[] = [
-  { type: "refresh_cache", label: "Refresh Cache" },
-  { type: "restart_service", label: "Restart Service" },
-  { type: "restart_browser", label: "Restart Browser" },
-  { type: "gpupdate", label: "gpupdate" },
-  { type: "reboot", label: "Reboot", danger: true },
-];
-
-type ActionState =
-  | { kind: "idle" }
-  | { kind: "sending"; type: CommandType }
-  | { kind: "success"; type: CommandType; message: string }
-  | { kind: "error"; type: CommandType; message: string };
+type TabId = "overview" | "commands" | "logs";
 
 const COMMANDS_POLL_MS = 5000;
 const LOGS_POLL_MS = 5000;
-const LOGS_PREVIEW_COUNT = 15;
-const ALERTS_PREVIEW_COUNT = 10;
+const TAB_STORAGE_PREFIX = "kiosk.details.tab:";
 
-const formatDate = (iso: string | null | undefined): string => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
+const loadLastTab = (machineName: string): TabId => {
+  try {
+    const raw = window.localStorage.getItem(TAB_STORAGE_PREFIX + machineName);
+    if (raw === "overview" || raw === "commands" || raw === "logs") return raw;
+  } catch {
+    // ignore storage errors
+  }
+  return "overview";
 };
 
-const formatRelative = (iso: string | null | undefined): string => {
-  if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (isNaN(t)) return "—";
-  const diff = Math.max(0, Date.now() - t);
-  const sec = Math.floor(diff / 1000);
-  if (sec < 5) return "just now";
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day}d ago`;
-};
-
-const formatLogTime = (iso: string): string => {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-};
-
-const levelToVariant = (level: string): string => {
-  const n = level.toLowerCase();
-  if (n === "error") return "error";
-  if (n === "warning" || n === "warn") return "warning";
-  if (n === "info") return "info";
-  return "neutral";
+const saveLastTab = (machineName: string, tab: TabId) => {
+  try {
+    window.localStorage.setItem(TAB_STORAGE_PREFIX + machineName, tab);
+  } catch {
+    // ignore storage errors
+  }
 };
 
 const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
   kiosk,
   onClose,
 }) => {
-  const can = useCan();
-  const [actionState, setActionState] = useState<ActionState>({ kind: "idle" });
-
   const { overview, alerts, loading: overviewLoading } = useKioskDetails(
     kiosk.machineName
+  );
+
+  const [activeTab, setActiveTab] = useState<TabId>(() =>
+    loadLastTab(kiosk.machineName)
   );
 
   const [commands, setCommands] = useState<KioskCommand[]>([]);
@@ -102,6 +60,18 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
   const [logs, setLogs] = useState<MachineLog[]>([]);
   const [logsLoading, setLogsLoading] = useState<boolean>(true);
   const [logsError, setLogsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveTab(loadLastTab(kiosk.machineName));
+  }, [kiosk.machineName]);
+
+  const handleTabChange = useCallback(
+    (id: TabId) => {
+      setActiveTab(id);
+      saveLastTab(kiosk.machineName, id);
+    },
+    [kiosk.machineName]
+  );
 
   const loadCommands = useCallback(async () => {
     setCommandsError(null);
@@ -156,193 +126,39 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
     return () => window.clearInterval(id);
   }, [loadLogs]);
 
-  const handleAction = async (type: CommandType, label: string) => {
-    setActionState({ kind: "sending", type });
-    try {
-      await createCommand(kiosk.machineName, type, "");
-      setActionState({
-        kind: "success",
-        type,
-        message: `${label} queued on ${kiosk.machineName}`,
-      });
-      loadCommands();
-    } catch (err) {
-      setActionState({
-        kind: "error",
-        type,
-        message: err instanceof Error ? err.message : "Action failed",
-      });
-    } finally {
-      window.setTimeout(() => {
-        setActionState((curr) =>
-          curr.kind !== "idle" && curr.type === type ? { kind: "idle" } : curr
-        );
-      }, 4000);
-    }
-  };
-
-  const renderFeedback = () => {
-    if (actionState.kind === "idle") return null;
-    const cls =
-      actionState.kind === "error"
-        ? "details-panel__toast details-panel__toast--error"
-        : actionState.kind === "success"
-        ? "details-panel__toast details-panel__toast--success"
-        : "details-panel__toast";
-    const text =
-      actionState.kind === "sending"
-        ? `Sending ${actionState.type}...`
-        : actionState.message;
-    return <div className={cls}>{text}</div>;
-  };
-
-  const displayStatus = overview?.status ?? kiosk.status;
-  const displayIp = overview?.ipAddress || kiosk.ipAddress;
-  const displayLastSeen = overview?.lastSeen ?? kiosk.lastSeen;
-  const siteLabel = overview?.siteName ?? "—";
-  const departmentLabel = overview?.departmentName ?? "—";
-  const activeAlerts = overview?.activeAlertsCount ?? 0;
-  const failedCommands24h = overview?.failedCommandsLast24h ?? 0;
-  const logsCount24h = overview?.logsCountLast24h ?? 0;
-
-  const renderOverview = () => (
-    <section className="details-panel__section">
-      <div className="details-panel__section-title">Overview</div>
-      <div className="details-panel__meta">
-        <div>
-          <div className="details-panel__label">Status</div>
-          <StatusBadge status={displayStatus} />
-        </div>
-        <div>
-          <div className="details-panel__label">IP Address</div>
-          <div className="details-panel__value details-panel__value--mono">
-            {displayIp || "—"}
-          </div>
-        </div>
-        <div>
-          <div className="details-panel__label">Last Seen</div>
-          <div className="details-panel__value">
-            {formatDate(displayLastSeen)}
-          </div>
-          <div className="details-panel__sublabel">
-            {formatRelative(displayLastSeen)}
-          </div>
-        </div>
-      </div>
-
-      <div className="details-panel__kv details-panel__kv--compact">
-        <div>
-          <div className="details-panel__label">Site</div>
-          <div className="details-panel__value">{siteLabel}</div>
-        </div>
-        <div>
-          <div className="details-panel__label">Department</div>
-          <div className="details-panel__value">{departmentLabel}</div>
-        </div>
-      </div>
-
-      <div className="kiosk-counters">
-        <div
-          className={`kiosk-counter${
-            activeAlerts > 0 ? " kiosk-counter--alert" : ""
-          }`}
-        >
-          <div className="kiosk-counter__value">
-            {overviewLoading && !overview ? "—" : activeAlerts}
-          </div>
-          <div className="kiosk-counter__label">Active alerts</div>
-        </div>
-        <div
-          className={`kiosk-counter${
-            failedCommands24h > 0 ? " kiosk-counter--warn" : ""
-          }`}
-        >
-          <div className="kiosk-counter__value">
-            {overviewLoading && !overview ? "—" : failedCommands24h}
-          </div>
-          <div className="kiosk-counter__label">Failed cmds · 24h</div>
-        </div>
-        <div className="kiosk-counter">
-          <div className="kiosk-counter__value">
-            {overviewLoading && !overview ? "—" : logsCount24h}
-          </div>
-          <div className="kiosk-counter__label">Log entries · 24h</div>
-        </div>
-      </div>
-    </section>
+  const { pending, feedback, trigger } = useKioskActions(
+    kiosk.machineName,
+    loadCommands
   );
 
-  const renderRecentAlerts = () => {
-    if (overviewLoading && alerts.length === 0 && !overview) {
-      return (
-        <div className="details-panel__hint">Loading alerts...</div>
+  const handleAction = async (type: CommandType, label: string) => {
+    if (type === "reboot") {
+      const ok = window.confirm(
+        `Reboot ${kiosk.machineName}? This will restart the machine.`
       );
+      if (!ok) return;
     }
-    if (alerts.length === 0) {
-      return (
-        <div className="details-panel__hint">
-          No alerts recorded for this kiosk.
-        </div>
-      );
-    }
-    const preview = alerts.slice(0, ALERTS_PREVIEW_COUNT);
-    return (
-      <ul className="kiosk-alerts">
-        {preview.map((a) => (
-          <li key={a.id} className="kiosk-alerts__row">
-            <div className="kiosk-alerts__head">
-              <span className="kiosk-alerts__type">{a.type}</span>
-              <span className="kiosk-alerts__time">
-                {formatRelative(a.createdAt)}
-              </span>
-            </div>
-            <div className="kiosk-alerts__msg">{a.message}</div>
-          </li>
-        ))}
-      </ul>
-    );
+    await trigger(type, label);
   };
 
-  const renderLogs = () => {
-    if (logsLoading && logs.length === 0) {
-      return <div className="details-panel__hint">Loading logs...</div>;
-    }
-    if (logsError) {
-      return (
-        <div className="details-panel__hint details-panel__hint--error">
-          <span>{logsError}</span>
-          <button className="btn btn--ghost" onClick={loadLogs}>
-            Retry
-          </button>
-        </div>
-      );
-    }
-    if (logs.length === 0) {
-      return (
-        <div className="details-panel__hint">No logs for this machine.</div>
-      );
-    }
-    const preview = logs.slice(0, LOGS_PREVIEW_COUNT);
-    return (
-      <ul className="kiosk-logs">
-        {preview.map((log, idx) => (
-          <li key={`${log.timestamp}-${idx}`} className="kiosk-logs__row">
-            <div className="kiosk-logs__main">
-              <span
-                className={`log-level log-level--${levelToVariant(log.level)}`}
-              >
-                {log.level}
-              </span>
-              <span className="kiosk-logs__msg">{log.message}</span>
-            </div>
-            <div className="kiosk-logs__meta">{formatLogTime(log.timestamp)}</div>
-          </li>
-        ))}
-      </ul>
-    );
-  };
+  const activeAlertCount = overview?.activeAlertsCount ?? alerts.length;
+  const failedCount = commands.filter(
+    (c) => c.status.toLowerCase() === "failed"
+  ).length;
 
-  const isSending = actionState.kind === "sending";
+  const tabs: TabDef<TabId>[] = [
+    {
+      id: "overview",
+      label: "Overview",
+      badge: activeAlertCount > 0 ? activeAlertCount : undefined,
+    },
+    {
+      id: "commands",
+      label: "Commands",
+      badge: failedCount > 0 ? failedCount : undefined,
+    },
+    { id: "logs", label: "Logs" },
+  ];
 
   return (
     <aside className="details-panel">
@@ -358,81 +174,46 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
         </button>
       </header>
 
-      {renderOverview()}
+      <Tabs<TabId>
+        tabs={tabs}
+        active={activeTab}
+        onChange={handleTabChange}
+        ariaLabel="Kiosk details sections"
+      />
 
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">
-          Recent alerts
-          <span className="details-panel__section-count">
-            {overviewLoading && !overview ? "—" : alerts.length}
-          </span>
-        </div>
-        {renderRecentAlerts()}
-      </section>
-
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">
-          Recent logs
-          <span className="details-panel__section-count">
-            {logsLoading && logs.length === 0 ? "—" : logs.length}
-          </span>
-        </div>
-        {renderLogs()}
-      </section>
-
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">
-          Command history
-          <span className="details-panel__section-count">
-            {commandsLoading && commands.length === 0 ? "—" : commands.length}
-          </span>
-        </div>
-        <CommandHistory
-          commands={commands}
-          loading={commandsLoading}
-          error={commandsError}
-          onRetry={loadCommands}
-        />
-      </section>
-
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">Quick actions</div>
-        <div className="details-panel__actions">
-          {ACTIONS.map((a) => {
-            const activeForThis =
-              actionState.kind !== "idle" && actionState.type === a.type;
-            const isReboot = a.type === "reboot";
-            if (isReboot && !can.reboot) return null;
-            const permitted = can.operate && (!isReboot || can.reboot);
-            const disabled = isSending || !permitted;
-            const title = !permitted
-              ? "You do not have permission to perform this action"
-              : undefined;
-            return (
-              <button
-                key={a.type}
-                className={`btn${a.danger ? " btn--danger" : ""}${
-                  !permitted ? " btn--disabled" : ""
-                }`}
-                onClick={() => handleAction(a.type, a.label)}
-                disabled={disabled}
-                title={title}
-                aria-disabled={disabled}
-              >
-                {activeForThis && actionState.kind === "sending"
-                  ? "Sending..."
-                  : a.label}
-              </button>
-            );
-          })}
-        </div>
-        {!can.operate && (
-          <div className="details-panel__toast">
-            Read-only access — actions are disabled for your role.
-          </div>
+      <div className="kiosk-tab-content">
+        {activeTab === "overview" && (
+          <KioskOverviewTab
+            machineName={kiosk.machineName}
+            displayName={kiosk.displayName}
+            fallbackStatus={kiosk.status}
+            fallbackIp={kiosk.ipAddress}
+            fallbackLastSeen={kiosk.lastSeen}
+            overview={overview}
+            overviewLoading={overviewLoading}
+            alerts={alerts}
+            pending={pending}
+            feedback={feedback}
+            onTrigger={handleAction}
+          />
         )}
-        {renderFeedback()}
-      </section>
+        {activeTab === "commands" && (
+          <KioskCommandsTab
+            commands={commands}
+            loading={commandsLoading}
+            error={commandsError}
+            onRetry={loadCommands}
+          />
+        )}
+        {activeTab === "logs" && (
+          <KioskLogsTab
+            logs={logs}
+            loading={logsLoading}
+            error={logsError}
+            onRetry={loadLogs}
+          />
+        )}
+      </div>
     </aside>
   );
 };

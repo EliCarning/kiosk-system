@@ -13,6 +13,7 @@ import {
   DashboardScope,
   useDashboardScope,
 } from "../hooks/useDashboardScope";
+import { useCommandsInProgress } from "../hooks/useCommandsInProgress";
 import { Kiosk, Site } from "../types/org";
 import { usePermissions } from "../context/PermissionsContext";
 
@@ -107,6 +108,8 @@ const OperationsPage: React.FC = () => {
     loading: summaryLoading,
   } = useDashboardScope(dashboardScope);
 
+  const commandsInProgress = useCommandsInProgress();
+
   useEffect(() => {
     if (org) setLastUpdated(new Date());
   }, [org]);
@@ -194,6 +197,7 @@ const OperationsPage: React.FC = () => {
             scope="global"
             global={globalSummary}
             loading={summaryLoading}
+            commandsInProgress={commandsInProgress}
           />
 
           {org.sites.length > 0 && (
@@ -226,6 +230,7 @@ const OperationsPage: React.FC = () => {
             scope="site"
             site={siteSummary}
             loading={summaryLoading}
+            commandsInProgress={commandsInProgress}
           />
 
           {selectedSite && (
@@ -300,6 +305,7 @@ const OperationsPage: React.FC = () => {
           scope="department"
           department={deptSummary}
           loading={summaryLoading}
+          commandsInProgress={commandsInProgress}
         />
 
         <IssuesPanel

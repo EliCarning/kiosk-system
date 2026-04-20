@@ -1,13 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { createCommand } from "../api/actions";
 import { fetchRecentCommands } from "../api/commands";
 import { KioskCommand } from "../types/command";
 import StateView from "../components/StateView";
 import { RealtimeEvents, subscribeRealtime } from "../realtime/events";
+import { usePolling } from "../hooks/usePolling";
 
-const POLL_MS = 15000;
+const POLL_MS = 8000;
 const STATUSES = ["all", "Pending", "Running", "Completed", "Failed"] as const;
 type StatusChip = (typeof STATUSES)[number];
+
+const RETRY_FEEDBACK_MS = 3500;
+
+interface RetryFeedback {
+  phase: "success" | "error";
+  message: string;
+}
 
 const formatTime = (iso: string | null): string => {
   if (!iso) return "—";
@@ -21,7 +30,8 @@ const statusPillClass = (status: string): string => {
   if (s === "completed") return "pill pill--ok";
   if (s === "failed") return "pill pill--err";
   if (s === "running") return "pill pill--info";
-  return "pill pill--warn";
+  if (s === "pending") return "pill pill--warn";
+  return "pill";
 };
 
 const CommandsPage: React.FC = () => {
@@ -31,6 +41,9 @@ const CommandsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusChip>("all");
   const [search, setSearch] = useState<string>("");
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retriedIds, setRetriedIds] = useState<Set<string>>(new Set());
+  const [feedback, setFeedback] = useState<RetryFeedback | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -49,28 +62,37 @@ const CommandsPage: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    load();
-  }, [load]);
+  }, [status]);
+
+  usePolling(load, { intervalMs: POLL_MS });
 
   useEffect(() => {
-    const id = window.setInterval(load, POLL_MS);
     const unsub = subscribeRealtime(RealtimeEvents.CommandUpdated, () =>
       load()
     );
-    return () => {
-      window.clearInterval(id);
-      unsub();
-    };
+    return () => unsub();
   }, [load]);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const id = window.setTimeout(() => setFeedback(null), RETRY_FEEDBACK_MS);
+    return () => window.clearTimeout(id);
+  }, [feedback]);
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return commands;
-    return commands.filter(
-      (c) =>
-        c.machineName.toLowerCase().includes(needle) ||
-        c.type.toLowerCase().includes(needle)
-    );
+    const base = !needle
+      ? commands
+      : commands.filter(
+          (c) =>
+            c.machineName.toLowerCase().includes(needle) ||
+            c.type.toLowerCase().includes(needle)
+        );
+    return [...base].sort((a, b) => {
+      const at = new Date(a.createdAt).getTime() || 0;
+      const bt = new Date(b.createdAt).getTime() || 0;
+      return bt - at;
+    });
   }, [commands, search]);
 
   const counts = useMemo(() => {
@@ -80,6 +102,37 @@ const CommandsPage: React.FC = () => {
     });
     return out;
   }, [commands]);
+
+  const handleRetry = useCallback(
+    async (cmd: KioskCommand) => {
+      if (retryingId) return;
+      setRetryingId(cmd.id);
+      try {
+        await createCommand(cmd.machineName, cmd.type, cmd.payload ?? "");
+        setRetriedIds((prev) => {
+          const next = new Set(prev);
+          next.add(cmd.id);
+          return next;
+        });
+        setFeedback({
+          phase: "success",
+          message: `Re-queued ${cmd.type} on ${cmd.machineName}`,
+        });
+        await load();
+      } catch (err) {
+        setFeedback({
+          phase: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : `Retry failed for ${cmd.machineName}`,
+        });
+      } finally {
+        setRetryingId(null);
+      }
+    },
+    [retryingId, load]
+  );
 
   return (
     <div className="page">
@@ -92,7 +145,7 @@ const CommandsPage: React.FC = () => {
         </div>
         <div className="page__actions">
           <button className="btn" onClick={load} disabled={loading}>
-            Refresh
+            {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </header>
@@ -119,6 +172,22 @@ const CommandsPage: React.FC = () => {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {feedback && (
+        <div
+          role="status"
+          className={`cmd-feedback cmd-feedback--${feedback.phase}`}
+        >
+          {feedback.message}
+          <button
+            type="button"
+            className="linklike"
+            onClick={() => setFeedback(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <section className="page__body">
         {loading && commands.length === 0 ? (
@@ -154,33 +223,73 @@ const CommandsPage: React.FC = () => {
                   <th>Type</th>
                   <th>Created</th>
                   <th>Completed</th>
+                  <th className="td-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <span className={statusPillClass(c.status)}>
-                        {c.status}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        className="linklike"
-                        onClick={() =>
-                          navigate(
-                            `/kiosks/${encodeURIComponent(c.machineName)}`
-                          )
-                        }
-                      >
-                        {c.machineName}
-                      </button>
-                    </td>
-                    <td>{c.type}</td>
-                    <td className="td-nowrap">{formatTime(c.createdAt)}</td>
-                    <td className="td-nowrap">{formatTime(c.completedAt)}</td>
-                  </tr>
-                ))}
+                {filtered.map((c) => {
+                  const isFailed = c.status.toLowerCase() === "failed";
+                  const isRetrying = retryingId === c.id;
+                  const alreadyRetried = retriedIds.has(c.id);
+                  return (
+                    <tr
+                      key={c.id}
+                      className={
+                        isFailed ? "table__row table__row--failed" : undefined
+                      }
+                    >
+                      <td>
+                        <span className={statusPillClass(c.status)}>
+                          {c.status}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          className="linklike"
+                          onClick={() =>
+                            navigate(
+                              `/kiosks/${encodeURIComponent(c.machineName)}`
+                            )
+                          }
+                        >
+                          {c.machineName}
+                        </button>
+                      </td>
+                      <td>
+                        <code className="cmd-type">{c.type}</code>
+                      </td>
+                      <td className="td-nowrap">{formatTime(c.createdAt)}</td>
+                      <td className="td-nowrap">
+                        {formatTime(c.completedAt)}
+                      </td>
+                      <td className="td-right">
+                        {isFailed ? (
+                          <button
+                            className={`btn btn--sm${
+                              isRetrying ? " is-loading" : ""
+                            }`}
+                            onClick={() => handleRetry(c)}
+                            disabled={retryingId !== null}
+                            aria-busy={isRetrying}
+                            title={
+                              alreadyRetried
+                                ? "This command was retried — a new attempt is in progress."
+                                : "Re-send this command"
+                            }
+                          >
+                            {isRetrying
+                              ? "Retrying…"
+                              : alreadyRetried
+                              ? "Retry again"
+                              : "Retry"}
+                          </button>
+                        ) : (
+                          <span className="td-muted">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

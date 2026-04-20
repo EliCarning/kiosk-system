@@ -4,7 +4,6 @@ import AppShell from "./components/layout/AppShell";
 import OperationsPage from "./pages/OperationsPage";
 import MachineDetailsPage from "./pages/MachineDetailsPage";
 import KiosksPage from "./pages/KiosksPage";
-import SitesPage from "./pages/SitesPage";
 import DepartmentsPage from "./pages/DepartmentsPage";
 import AlertsPage from "./pages/AlertsPage";
 import CommandsPage from "./pages/CommandsPage";
@@ -37,7 +36,6 @@ const App: React.FC = () => {
                       path="/kiosks/:machineName"
                       element={<MachineDetailsPage />}
                     />
-                    <Route path="/sites" element={<SitesPage />} />
                     <Route path="/departments" element={<DepartmentsPage />} />
                     <Route path="/alerts" element={<AlertsPage />} />
                     <Route path="/commands" element={<CommandsPage />} />
@@ -46,6 +44,10 @@ const App: React.FC = () => {
                     <Route
                       path="/machines/:machineName"
                       element={<MachineDetailsPage />}
+                    />
+                    <Route
+                      path="/sites"
+                      element={<Navigate to="/dashboard" replace />}
                     />
                     <Route
                       path="*"

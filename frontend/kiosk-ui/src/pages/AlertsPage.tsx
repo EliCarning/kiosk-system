@@ -8,10 +8,12 @@ import {
 } from "../api/alerts";
 import StateView from "../components/StateView";
 import { RealtimeEvents, subscribeRealtime } from "../realtime/events";
+import { usePolling } from "../hooks/usePolling";
 
 type Tab = "active" | "history";
 
-const POLL_MS = 15000;
+const POLL_MS = 8000;
+const FEEDBACK_MS = 3500;
 
 const formatTime = (iso: string): string => {
   if (!iso) return "—";
@@ -19,6 +21,11 @@ const formatTime = (iso: string): string => {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
 };
+
+interface Feedback {
+  phase: "success" | "error";
+  message: string;
+}
 
 const AlertsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -29,7 +36,8 @@ const AlertsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [resolvingIds, setResolvingIds] = useState<Set<string>>(new Set());
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -46,17 +54,20 @@ const AlertsPage: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    load();
+  }, []);
+
+  usePolling(load, { intervalMs: POLL_MS });
+
+  useEffect(() => {
+    const unsub = subscribeRealtime(RealtimeEvents.AlertCreated, () => load());
+    return () => unsub();
   }, [load]);
 
   useEffect(() => {
-    const id = window.setInterval(load, POLL_MS);
-    const unsub = subscribeRealtime(RealtimeEvents.AlertCreated, () => load());
-    return () => {
-      window.clearInterval(id);
-      unsub();
-    };
-  }, [load]);
+    if (!feedback) return;
+    const id = window.setTimeout(() => setFeedback(null), FEEDBACK_MS);
+    return () => window.clearTimeout(id);
+  }, [feedback]);
 
   const source = tab === "active" ? active : history;
 
@@ -79,15 +90,46 @@ const AlertsPage: React.FC = () => {
     });
   }, [source, search, typeFilter]);
 
-  const handleResolve = async (id: string) => {
-    setResolvingId(id);
+  const handleResolve = async (alert: Alert) => {
+    if (resolvingIds.has(alert.id)) return;
+
+    setResolvingIds((prev) => {
+      const next = new Set(prev);
+      next.add(alert.id);
+      return next;
+    });
+
+    const previousActive = active;
+    const previousHistory = history;
+    const optimisticResolved: Alert = {
+      ...alert,
+      isResolved: true,
+      resolvedAt: new Date().toISOString(),
+    };
+    setActive((list) => list.filter((a) => a.id !== alert.id));
+    setHistory((list) => [optimisticResolved, ...list]);
+
     try {
-      await resolveAlert(id);
-      await load();
+      await resolveAlert(alert.id);
+      setFeedback({
+        phase: "success",
+        message: `Resolved ${alert.type} on ${alert.machineName}`,
+      });
+      load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to resolve alert");
+      setActive(previousActive);
+      setHistory(previousHistory);
+      setFeedback({
+        phase: "error",
+        message:
+          err instanceof Error ? err.message : "Unable to resolve alert",
+      });
     } finally {
-      setResolvingId(null);
+      setResolvingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(alert.id);
+        return next;
+      });
     }
   };
 
@@ -95,6 +137,14 @@ const AlertsPage: React.FC = () => {
     if (!machineName) return;
     navigate(`/kiosks/${encodeURIComponent(machineName)}`);
   };
+
+  const emptyTitle = tab === "active" ? "No active alerts" : "No alert history";
+  const emptyMessage =
+    search || typeFilter !== "all"
+      ? "Adjust filters to see more results."
+      : tab === "active"
+      ? "All clear — no active alerts right now."
+      : "No resolved alerts yet.";
 
   return (
     <div className="page">
@@ -107,7 +157,7 @@ const AlertsPage: React.FC = () => {
         </div>
         <div className="page__actions">
           <button className="btn" onClick={load} disabled={loading}>
-            Refresh
+            {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </header>
@@ -148,6 +198,22 @@ const AlertsPage: React.FC = () => {
         </select>
       </div>
 
+      {feedback && (
+        <div
+          role="status"
+          className={`cmd-feedback cmd-feedback--${feedback.phase}`}
+        >
+          {feedback.message}
+          <button
+            type="button"
+            className="linklike"
+            onClick={() => setFeedback(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <section className="page__body">
         {loading && source.length === 0 ? (
           <StateView
@@ -165,14 +231,8 @@ const AlertsPage: React.FC = () => {
         ) : filtered.length === 0 ? (
           <StateView
             variant="empty"
-            title={tab === "active" ? "No active alerts" : "No alert history"}
-            message={
-              search || typeFilter !== "all"
-                ? "Adjust filters to see more results."
-                : tab === "active"
-                ? "All clear — no active alerts right now."
-                : "No resolved alerts yet."
-            }
+            title={emptyTitle}
+            message={emptyMessage}
           />
         ) : (
           <div className="table-wrap">
@@ -184,47 +244,57 @@ const AlertsPage: React.FC = () => {
                   <th>Message</th>
                   <th>Created</th>
                   <th>{tab === "active" ? "Status" : "Resolved"}</th>
-                  <th></th>
+                  <th className="td-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((a) => (
-                  <tr key={a.id}>
-                    <td>
-                      <span className="pill pill--warn">{a.type}</span>
-                    </td>
-                    <td>
-                      <button
-                        className="linklike"
-                        onClick={() => goToKiosk(a.machineName)}
-                      >
-                        {a.machineName}
-                      </button>
-                    </td>
-                    <td className="td-message">{a.message}</td>
-                    <td className="td-nowrap">{formatTime(a.createdAt)}</td>
-                    <td className="td-nowrap">
-                      {a.isResolved ? (
-                        <span className="pill pill--ok">
-                          {a.resolvedAt ? formatTime(a.resolvedAt) : "Resolved"}
-                        </span>
-                      ) : (
-                        <span className="pill pill--warn">Active</span>
-                      )}
-                    </td>
-                    <td className="td-right">
-                      {!a.isResolved && (
+                {filtered.map((a) => {
+                  const isResolving = resolvingIds.has(a.id);
+                  return (
+                    <tr key={a.id}>
+                      <td>
+                        <span className="pill pill--warn">{a.type}</span>
+                      </td>
+                      <td>
                         <button
-                          className="btn btn--sm"
-                          disabled={resolvingId === a.id}
-                          onClick={() => handleResolve(a.id)}
+                          className="linklike"
+                          onClick={() => goToKiosk(a.machineName)}
                         >
-                          {resolvingId === a.id ? "Resolving…" : "Resolve"}
+                          {a.machineName}
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="td-message">{a.message}</td>
+                      <td className="td-nowrap">{formatTime(a.createdAt)}</td>
+                      <td className="td-nowrap">
+                        {a.isResolved ? (
+                          <span className="pill pill--ok">
+                            {a.resolvedAt
+                              ? formatTime(a.resolvedAt)
+                              : "Resolved"}
+                          </span>
+                        ) : (
+                          <span className="pill pill--warn">Active</span>
+                        )}
+                      </td>
+                      <td className="td-right">
+                        {!a.isResolved ? (
+                          <button
+                            className={`btn btn--sm${
+                              isResolving ? " is-loading" : ""
+                            }`}
+                            disabled={isResolving}
+                            aria-busy={isResolving}
+                            onClick={() => handleResolve(a)}
+                          >
+                            {isResolving ? "Resolving…" : "Resolve"}
+                          </button>
+                        ) : (
+                          <span className="td-muted">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

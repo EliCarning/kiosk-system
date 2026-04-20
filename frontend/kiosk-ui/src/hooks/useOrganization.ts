@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchOrganization } from "../api/org";
 import { Organization } from "../types/org";
 import { RealtimeEvents, subscribeRealtime } from "../realtime/events";
+import { usePolling } from "./usePolling";
 
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 8000;
 
 export interface OrgState {
   org: Organization | null;
@@ -18,20 +19,22 @@ export function useOrganization(): OrgState {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setError(null);
     try {
       const data = await fetchOrganization();
       setOrg(data);
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load organization");
+      setError(
+        err instanceof Error ? err.message : "Unable to load organization"
+      );
     } finally {
       setLoading(false);
     }
   }, []);
 
+  usePolling(load, { intervalMs: POLL_INTERVAL_MS });
+
   useEffect(() => {
-    load();
-    const id = window.setInterval(load, POLL_INTERVAL_MS);
     const unsubscribe = subscribeRealtime(
       RealtimeEvents.MachineUpdated,
       () => {
@@ -39,7 +42,6 @@ export function useOrganization(): OrgState {
       }
     );
     return () => {
-      window.clearInterval(id);
       unsubscribe();
     };
   }, [load]);

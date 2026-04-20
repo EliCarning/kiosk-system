@@ -18,20 +18,21 @@ const healthPct = (online: number, total: number): number =>
 
 const globalKpis = (s: GlobalSummary): Kpi[] => [
   {
-    label: "Sites",
-    value: s.totalSites,
-    hint: `${s.totalDepartments} departments`,
-  },
-  {
-    label: "Kiosks",
+    label: "Total kiosks",
     value: s.totalKiosks,
-    hint: `${healthPct(s.onlineKiosks, s.totalKiosks)}% online`,
+    hint: `${s.totalSites} sites · ${s.totalDepartments} departments`,
   },
   {
     label: "Online",
     value: s.onlineKiosks,
     accent: "online",
-    hint: `${s.offlineKiosks} offline`,
+    hint: `${healthPct(s.onlineKiosks, s.totalKiosks)}% online`,
+  },
+  {
+    label: "Offline",
+    value: s.offlineKiosks,
+    accent: s.offlineKiosks > 0 ? "offline" : "default",
+    hint: s.offlineKiosks > 0 ? "Needs attention" : "All reachable",
   },
   {
     label: "Active alerts",
@@ -43,19 +44,20 @@ const globalKpis = (s: GlobalSummary): Kpi[] => [
 
 const siteKpis = (s: SiteSummary): Kpi[] => [
   {
-    label: "Departments",
-    value: s.totalDepartments,
-  },
-  {
     label: "Kiosks",
     value: s.totalKiosks,
-    hint: `${healthPct(s.onlineKiosks, s.totalKiosks)}% online`,
+    hint: `${s.totalDepartments} departments`,
   },
   {
     label: "Online",
     value: s.onlineKiosks,
     accent: "online",
-    hint: `${s.offlineKiosks} offline`,
+    hint: `${healthPct(s.onlineKiosks, s.totalKiosks)}% online`,
+  },
+  {
+    label: "Offline",
+    value: s.offlineKiosks,
+    accent: s.offlineKiosks > 0 ? "offline" : "default",
   },
   {
     label: "Active alerts",
@@ -95,6 +97,7 @@ interface Props {
   site?: SiteSummary | null;
   department?: DepartmentSummary | null;
   loading?: boolean;
+  commandsInProgress?: number;
 }
 
 const SummaryCards: React.FC<Props> = ({
@@ -103,11 +106,27 @@ const SummaryCards: React.FC<Props> = ({
   site,
   department,
   loading,
+  commandsInProgress,
 }) => {
   let cards: Kpi[] = [];
   if (scope === "global" && global) cards = globalKpis(global);
   else if (scope === "site" && site) cards = siteKpis(site);
   else if (scope === "department" && department) cards = deptKpis(department);
+
+  if (typeof commandsInProgress === "number") {
+    cards = [
+      ...cards,
+      {
+        label: "Commands in progress",
+        value: commandsInProgress,
+        accent: commandsInProgress > 0 ? "warning" : "default",
+        hint:
+          commandsInProgress > 0
+            ? "Pending or running"
+            : "No active dispatches",
+      },
+    ];
+  }
 
   if (cards.length === 0) {
     return (

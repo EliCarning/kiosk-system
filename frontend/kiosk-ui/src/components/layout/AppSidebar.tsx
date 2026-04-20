@@ -1,6 +1,7 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { useTheme } from "../../context/ThemeContext";
+import GlobalSearch from "../search/GlobalSearch";
 
 interface NavItem {
   to: string;
@@ -36,11 +37,6 @@ const NAV_ITEMS: NavItem[] = [
     to: "/kiosks",
     label: "Kiosks",
     icon: <Icon d="M3 5h18v11H3zM8 20h8M12 16v4" />,
-  },
-  {
-    to: "/sites",
-    label: "Sites",
-    icon: <Icon d="M12 22s-7-6.5-7-12a7 7 0 1114 0c0 5.5-7 12-7 12zM12 10.5a2.5 2.5 0 100 0z" />,
   },
   {
     to: "/departments",
@@ -151,6 +147,12 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ collapsed, onToggle }) => {
           </div>
         )}
       </div>
+
+      {!collapsed && (
+        <div className="app-sidebar__search">
+          <GlobalSearch />
+        </div>
+      )}
 
       <nav className="app-sidebar__nav">
         {NAV_ITEMS.map((item) => (

@@ -12,6 +12,7 @@ export async function createCommand(
   const response = await fetch(`${API_BASE_URL}/api/commands`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(body),
   });
 

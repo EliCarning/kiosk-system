@@ -5,8 +5,9 @@ import { fetchRecentCommands } from "../api/commands";
 import { KioskCommand } from "../types/command";
 import StateView from "../components/StateView";
 import { RealtimeEvents, subscribeRealtime } from "../realtime/events";
+import { usePolling } from "../hooks/usePolling";
 
-const POLL_MS = 15000;
+const POLL_MS = 8000;
 
 type EventKind = "alert" | "command" | "machine";
 
@@ -98,12 +99,11 @@ const ActivityPage: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    load();
-  }, [load]);
+  }, []);
+
+  usePolling(load, { intervalMs: POLL_MS });
 
   useEffect(() => {
-    const id = window.setInterval(load, POLL_MS);
-
     const unsubMachine = subscribeRealtime<any>(
       RealtimeEvents.MachineUpdated,
       (payload) => {
@@ -137,7 +137,6 @@ const ActivityPage: React.FC = () => {
       load()
     );
     return () => {
-      window.clearInterval(id);
       unsubMachine();
       unsubAlert();
       unsubCmd();
