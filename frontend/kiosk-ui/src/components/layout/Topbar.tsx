@@ -13,6 +13,8 @@ interface TopbarProps {
   lastUpdated: Date | null;
   sidePanelOpen?: boolean;
   onToggleSidePanel?: () => void;
+  editDashboardActive?: boolean;
+  onEditDashboard?: () => void;
 }
 
 const statusOptions: { value: StatusFilter; label: string }[] = [
@@ -49,6 +51,8 @@ const Topbar: React.FC<TopbarProps> = ({
   lastUpdated,
   sidePanelOpen,
   onToggleSidePanel,
+  editDashboardActive,
+  onEditDashboard,
 }) => {
   return (
     <div className="topbar">
@@ -92,6 +96,15 @@ const Topbar: React.FC<TopbarProps> = ({
           <span className="topbar__timestamp">
             Updated {lastUpdated.toLocaleTimeString()}
           </span>
+        )}
+        {onEditDashboard && (
+          <button
+            className={`btn btn--ghost${editDashboardActive ? " is-active" : ""}`}
+            onClick={onEditDashboard}
+            aria-pressed={editDashboardActive ?? false}
+          >
+            Edit Dashboard
+          </button>
         )}
         <button
           className="btn btn--primary"

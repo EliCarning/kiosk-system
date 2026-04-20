@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<Command> Commands => Set<Command>();
     public DbSet<Log> Logs => Set<Log>();
     public DbSet<Alert> Alerts => Set<Alert>();
+    public DbSet<SystemInfo> SystemInfoSnapshots => Set<SystemInfo>();
+    public DbSet<EventLogEntry> EventLogEntries => Set<EventLogEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +82,30 @@ public class AppDbContext : DbContext
             entity.Property(a => a.Message).IsRequired();
             entity.HasIndex(a => new { a.MachineName, a.Type, a.IsResolved });
             entity.HasIndex(a => a.CreatedAt);
+        });
+
+        modelBuilder.Entity<SystemInfo>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.MachineName).IsRequired().HasMaxLength(200);
+            entity.Property(s => s.Hostname).IsRequired().HasMaxLength(200);
+            entity.Property(s => s.OsVersion).IsRequired().HasMaxLength(512);
+            entity.Property(s => s.IpAddress).HasMaxLength(64);
+            entity.Property(s => s.Uptime).HasMaxLength(100);
+            entity.Property(s => s.CurrentUser).HasMaxLength(200);
+            entity.HasIndex(s => new { s.MachineName, s.CollectedAt });
+        });
+
+        modelBuilder.Entity<EventLogEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.MachineName).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.LogName).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Source).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Level).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.Message).IsRequired();
+            entity.HasIndex(e => new { e.MachineName, e.CollectedAt });
+            entity.HasIndex(e => e.Timestamp);
         });
     }
 }

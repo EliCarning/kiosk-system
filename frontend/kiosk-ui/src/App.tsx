@@ -11,6 +11,7 @@ import ActivityPage from "./pages/ActivityPage";
 import SettingsPage from "./pages/SettingsPage";
 import { PermissionsProvider } from "./context/PermissionsContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import { SettingsProvider } from "./context/SettingsContext";
 import { AlertsProvider } from "./context/AlertsContext";
 import { NotificationsProvider } from "./context/NotificationsContext";
 import { RealtimeProvider } from "./realtime/RealtimeProvider";
@@ -19,6 +20,7 @@ import NotificationsHost from "./components/notifications/NotificationsHost";
 const App: React.FC = () => {
   return (
     <ThemeProvider>
+      <SettingsProvider>
       <PermissionsProvider>
         <BrowserRouter>
           <RealtimeProvider>
@@ -61,6 +63,7 @@ const App: React.FC = () => {
           </RealtimeProvider>
         </BrowserRouter>
       </PermissionsProvider>
+      </SettingsProvider>
     </ThemeProvider>
   );
 };

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.InteropServices;
 
 namespace KioskAgent;
 
@@ -184,6 +185,16 @@ public class Worker : BackgroundService
                     level = "Info";
                     message = "Reboot simulated";
                     break;
+                case "collect_system_info":
+                    (success, message) = await CollectAndSendSystemInfoAsync(
+                        backendBaseUrl, logsUrl, stoppingToken);
+                    level = success ? "Info" : "Error";
+                    break;
+                case "collect_event_logs":
+                    (success, message) = await CollectAndSendEventLogsAsync(
+                        backendBaseUrl, logsUrl, stoppingToken);
+                    level = success ? "Info" : "Error";
+                    break;
                 default:
                     level = "Warning";
                     message = $"Unknown command type: {type}";
@@ -323,6 +334,136 @@ public class Worker : BackgroundService
         }
     }
 
+    private async Task<(bool success, string message)> CollectAndSendSystemInfoAsync(
+        string backendBaseUrl,
+        string logsUrl,
+        CancellationToken ct)
+    {
+        try
+        {
+            var uptimeSpan = TimeSpan.FromMilliseconds(Environment.TickCount64);
+            var uptimeStr = $"{(int)uptimeSpan.TotalDays}d {uptimeSpan.Hours}h {uptimeSpan.Minutes}m";
+
+            var payload = new
+            {
+                machineName = Environment.MachineName,
+                hostname = Dns.GetHostName(),
+                osVersion = RuntimeInformation.OSDescription,
+                ipAddress = GetLocalIpAddress(),
+                uptime = uptimeStr,
+                currentUser = Environment.UserName
+            };
+
+            _logger.LogInformation(
+                "Collecting system info for {MachineName}: OS={OS}, IP={IP}",
+                payload.machineName, payload.osVersion, payload.ipAddress);
+
+            var url = $"{backendBaseUrl}/api/system-info";
+            var response = await _httpClient.PostAsJsonAsync(url, payload, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "System info POST failed: {Status} {Body}",
+                    response.StatusCode, body);
+                return (false, $"System info upload failed: HTTP {(int)response.StatusCode}");
+            }
+
+            return (true, $"System info collected and sent for {payload.machineName}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error collecting system info");
+            return (false, $"System info collection failed: {ex.Message}");
+        }
+    }
+
+    private async Task<(bool success, string message)> CollectAndSendEventLogsAsync(
+        string backendBaseUrl,
+        string logsUrl,
+        CancellationToken ct)
+    {
+        try
+        {
+            var entries = CollectWindowsEventLogs();
+
+            _logger.LogInformation(
+                "Collected {Count} event log entries for {MachineName}",
+                entries.Count, Environment.MachineName);
+
+            var batch = new
+            {
+                machineName = Environment.MachineName,
+                entries
+            };
+
+            var url = $"{backendBaseUrl}/api/event-logs";
+            var response = await _httpClient.PostAsJsonAsync(url, batch, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "Event logs POST failed: {Status} {Body}",
+                    response.StatusCode, body);
+                return (false, $"Event log upload failed: HTTP {(int)response.StatusCode}");
+            }
+
+            return (true, $"Collected and sent {entries.Count} event log entries");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error collecting event logs");
+            return (false, $"Event log collection failed: {ex.Message}");
+        }
+    }
+
+    private static List<CollectedEventLogEntry> CollectWindowsEventLogs()
+    {
+        var result = new List<CollectedEventLogEntry>();
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return result;
+        }
+
+#pragma warning disable CA1416
+        foreach (var logName in new[] { "Application", "System" })
+        {
+            try
+            {
+                using var eventLog = new System.Diagnostics.EventLog(logName);
+                var count = eventLog.Entries.Count;
+                var start = Math.Max(0, count - 25);
+
+                for (var i = count - 1; i >= start && result.Count < 50; i--)
+                {
+                    var e = eventLog.Entries[i];
+                    var msg = e.Message;
+                    if (msg.Length > 512) msg = msg[..512] + "…";
+
+                    result.Add(new CollectedEventLogEntry
+                    {
+                        LogName = logName,
+                        Source = e.Source,
+                        EventId = (int)(e.InstanceId & 0xFFFF),
+                        Level = e.EntryType.ToString(),
+                        Message = msg,
+                        Timestamp = e.TimeGenerated.ToUniversalTime()
+                    });
+                }
+            }
+            catch (Exception)
+            {
+                // Log not accessible — skip silently
+            }
+        }
+#pragma warning restore CA1416
+
+        return result;
+    }
+
     private sealed class PendingCommand
     {
         public Guid Id { get; set; }
@@ -332,5 +473,15 @@ public class Worker : BackgroundService
         public string Status { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
+    }
+
+    private sealed class CollectedEventLogEntry
+    {
+        public string LogName { get; set; } = string.Empty;
+        public string Source { get; set; } = string.Empty;
+        public int EventId { get; set; }
+        public string Level { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; }
     }
 }

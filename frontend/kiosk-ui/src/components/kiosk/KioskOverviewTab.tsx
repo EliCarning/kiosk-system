@@ -1,7 +1,7 @@
 import React from "react";
 import StatusBadge from "../StatusBadge";
 import { CommandType } from "../../types/command";
-import { KioskAlert, KioskOverview } from "../../api/kioskDetails";
+import { KioskOverview } from "../../api/kioskDetails";
 import { ActionFeedback } from "../../hooks/useKioskActions";
 import { useCan } from "../../context/PermissionsContext";
 
@@ -26,13 +26,10 @@ interface KioskOverviewTabProps {
   fallbackLastSeen: string | null;
   overview: KioskOverview | null;
   overviewLoading: boolean;
-  alerts: KioskAlert[];
   pending: CommandType | null;
   feedback: ActionFeedback | null;
   onTrigger: (type: CommandType, label: string) => void;
 }
-
-const ALERTS_PREVIEW_COUNT = 10;
 
 const formatDate = (iso: string | null | undefined): string => {
   if (!iso) return "—";
@@ -65,7 +62,6 @@ const KioskOverviewTab: React.FC<KioskOverviewTabProps> = ({
   fallbackLastSeen,
   overview,
   overviewLoading,
-  alerts,
   pending,
   feedback,
   onTrigger,
@@ -90,35 +86,6 @@ const KioskOverviewTab: React.FC<KioskOverviewTabProps> = ({
         ? "details-panel__toast details-panel__toast--success"
         : "details-panel__toast";
     return <div className={cls}>{feedback.message}</div>;
-  };
-
-  const renderAlerts = () => {
-    if (overviewLoading && alerts.length === 0 && !overview) {
-      return <div className="details-panel__hint">Loading alerts…</div>;
-    }
-    if (alerts.length === 0) {
-      return (
-        <div className="details-panel__hint">
-          No alerts recorded for this kiosk.
-        </div>
-      );
-    }
-    const preview = alerts.slice(0, ALERTS_PREVIEW_COUNT);
-    return (
-      <ul className="kiosk-alerts">
-        {preview.map((a) => (
-          <li key={a.id} className="kiosk-alerts__row">
-            <div className="kiosk-alerts__head">
-              <span className="kiosk-alerts__type">{a.type}</span>
-              <span className="kiosk-alerts__time">
-                {formatRelative(a.createdAt)}
-              </span>
-            </div>
-            <div className="kiosk-alerts__msg">{a.message}</div>
-          </li>
-        ))}
-      </ul>
-    );
   };
 
   return (
@@ -244,15 +211,6 @@ const KioskOverviewTab: React.FC<KioskOverviewTabProps> = ({
         {renderFeedback()}
       </section>
 
-      <section className="details-panel__section">
-        <div className="details-panel__section-title">
-          Current alerts
-          <span className="details-panel__section-count">
-            {overviewLoading && !overview ? "—" : alerts.length}
-          </span>
-        </div>
-        {renderAlerts()}
-      </section>
     </div>
   );
 };

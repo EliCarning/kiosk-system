@@ -436,8 +436,96 @@ app.MapGet("/api/kiosks/{machineName}/recent-alerts",
         Results.Ok(await svc.GetKioskRecentAlertsAsync(machineName, 20, ct)))
     .RequireAuthorization(KioskPolicies.RequireViewer);
 
+// ── System Info ──────────────────────────────────────────────────────────────
+
+app.MapPost("/api/system-info", async (HttpContext ctx, SystemInfo payload, AppDbContext db, CancellationToken ct) =>
+{
+    var denied = RequireAgentKey(ctx);
+    if (denied is not null) return denied;
+
+    if (string.IsNullOrWhiteSpace(payload.MachineName))
+        return Results.BadRequest("machineName is required");
+
+    payload.Id = Guid.NewGuid();
+    payload.CollectedAt = DateTime.UtcNow;
+
+    db.SystemInfoSnapshots.Add(payload);
+    await db.SaveChangesAsync(ct);
+
+    return Results.Ok(payload);
+}).AllowAnonymous();
+
+app.MapGet("/api/kiosks/{machineName}/system-info/latest",
+    async (string machineName, AppDbContext db, CancellationToken ct) =>
+    {
+        var snapshot = await db.SystemInfoSnapshots
+            .AsNoTracking()
+            .Where(s => s.MachineName == machineName)
+            .OrderByDescending(s => s.CollectedAt)
+            .FirstOrDefaultAsync(ct);
+
+        return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
+// ── Event Logs ───────────────────────────────────────────────────────────────
+
+app.MapPost("/api/event-logs", async (HttpContext ctx, EventLogBatch batch, AppDbContext db, CancellationToken ct) =>
+{
+    var denied = RequireAgentKey(ctx);
+    if (denied is not null) return denied;
+
+    if (string.IsNullOrWhiteSpace(batch.MachineName))
+        return Results.BadRequest("machineName is required");
+
+    if (batch.Entries is null || batch.Entries.Count == 0)
+        return Results.Ok(new { saved = 0 });
+
+    var collectedAt = DateTime.UtcNow;
+    var entries = batch.Entries.Select(e => new EventLogEntry
+    {
+        Id = Guid.NewGuid(),
+        MachineName = batch.MachineName,
+        LogName = e.LogName,
+        Source = e.Source,
+        EventId = e.EventId,
+        Level = e.Level,
+        Message = e.Message,
+        Timestamp = e.Timestamp,
+        CollectedAt = collectedAt
+    }).ToList();
+
+    db.EventLogEntries.AddRange(entries);
+    await db.SaveChangesAsync(ct);
+
+    return Results.Ok(new { saved = entries.Count });
+}).AllowAnonymous();
+
+app.MapGet("/api/kiosks/{machineName}/event-logs",
+    async (string machineName, int? limit, AppDbContext db, CancellationToken ct) =>
+    {
+        var take = Math.Clamp(limit ?? 50, 1, 200);
+        var entries = await db.EventLogEntries
+            .AsNoTracking()
+            .Where(e => e.MachineName == machineName)
+            .OrderByDescending(e => e.Timestamp)
+            .Take(take)
+            .ToListAsync(ct);
+
+        return Results.Ok(entries);
+    }).RequireAuthorization(KioskPolicies.RequireViewer);
+
 app.MapHub<KioskHub>("/hubs/kiosk");
 
 app.Run();
 
 public record AssignKioskRequest(Guid? SiteId, Guid? DepartmentId);
+
+public record EventLogEntryDto(
+    string LogName,
+    string Source,
+    int EventId,
+    string Level,
+    string Message,
+    DateTime Timestamp);
+
+public record EventLogBatch(string MachineName, List<EventLogEntryDto> Entries);

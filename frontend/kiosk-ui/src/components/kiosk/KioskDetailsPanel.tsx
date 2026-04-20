@@ -11,13 +11,14 @@ import Tabs, { TabDef } from "../Tabs";
 import KioskOverviewTab from "./KioskOverviewTab";
 import KioskCommandsTab from "./KioskCommandsTab";
 import KioskLogsTab from "./KioskLogsTab";
+import KioskAlertsTab from "./KioskAlertsTab";
 
 interface KioskDetailsPanelProps {
   kiosk: Kiosk;
   onClose: () => void;
 }
 
-type TabId = "overview" | "commands" | "logs";
+type TabId = "overview" | "commands" | "logs" | "alerts";
 
 const COMMANDS_POLL_MS = 5000;
 const LOGS_POLL_MS = 5000;
@@ -26,7 +27,13 @@ const TAB_STORAGE_PREFIX = "kiosk.details.tab:";
 const loadLastTab = (machineName: string): TabId => {
   try {
     const raw = window.localStorage.getItem(TAB_STORAGE_PREFIX + machineName);
-    if (raw === "overview" || raw === "commands" || raw === "logs") return raw;
+    if (
+      raw === "overview" ||
+      raw === "commands" ||
+      raw === "logs" ||
+      raw === "alerts"
+    )
+      return raw;
   } catch {
     // ignore storage errors
   }
@@ -45,7 +52,7 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
   kiosk,
   onClose,
 }) => {
-  const { overview, alerts, loading: overviewLoading } = useKioskDetails(
+  const { overview, loading: overviewLoading } = useKioskDetails(
     kiosk.machineName
   );
 
@@ -141,23 +148,24 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
     await trigger(type, label);
   };
 
-  const activeAlertCount = overview?.activeAlertsCount ?? alerts.length;
+  const activeAlertCount = overview?.activeAlertsCount ?? 0;
   const failedCount = commands.filter(
     (c) => c.status.toLowerCase() === "failed"
   ).length;
 
   const tabs: TabDef<TabId>[] = [
-    {
-      id: "overview",
-      label: "Overview",
-      badge: activeAlertCount > 0 ? activeAlertCount : undefined,
-    },
+    { id: "overview", label: "Overview" },
     {
       id: "commands",
       label: "Commands",
       badge: failedCount > 0 ? failedCount : undefined,
     },
     { id: "logs", label: "Logs" },
+    {
+      id: "alerts",
+      label: "Alerts",
+      badge: activeAlertCount > 0 ? activeAlertCount : undefined,
+    },
   ];
 
   return (
@@ -191,7 +199,6 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
             fallbackLastSeen={kiosk.lastSeen}
             overview={overview}
             overviewLoading={overviewLoading}
-            alerts={alerts}
             pending={pending}
             feedback={feedback}
             onTrigger={handleAction}
@@ -212,6 +219,9 @@ const KioskDetailsPanel: React.FC<KioskDetailsPanelProps> = ({
             error={logsError}
             onRetry={loadLogs}
           />
+        )}
+        {activeTab === "alerts" && (
+          <KioskAlertsTab machineName={kiosk.machineName} />
         )}
       </div>
     </aside>

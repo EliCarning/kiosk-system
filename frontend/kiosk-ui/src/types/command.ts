@@ -4,6 +4,8 @@ export type CommandType =
   | "restart_browser"
   | "gpupdate"
   | "reboot"
+  | "collect_system_info"
+  | "collect_event_logs"
   | string;
 
 export type CommandStatus = "Pending" | "Completed" | "Failed" | string;

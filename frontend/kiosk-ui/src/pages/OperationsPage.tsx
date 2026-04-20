@@ -3,6 +3,7 @@ import Sidebar from "../components/layout/Sidebar";
 import Topbar, { StatusFilter } from "../components/layout/Topbar";
 import SummaryCards from "../components/summary/SummaryCards";
 import IssuesPanel from "../components/summary/IssuesPanel";
+import RecentCommandsPanel from "../components/summary/RecentCommandsPanel";
 import SiteOverviewCard from "../components/site/SiteOverviewCard";
 import DepartmentSection from "../components/department/DepartmentSection";
 import KioskDetailsPanel from "../components/kiosk/KioskDetailsPanel";
@@ -14,8 +15,17 @@ import {
   useDashboardScope,
 } from "../hooks/useDashboardScope";
 import { useCommandsInProgress } from "../hooks/useCommandsInProgress";
+import { useRecentCommands } from "../hooks/useRecentCommands";
+import { useAlerts } from "../context/AlertsContext";
+import {
+  IssueAlert,
+  IssueCommand,
+  IssuesResponse,
+  ProblematicKiosk,
+} from "../api/dashboard";
 import { Kiosk, Site } from "../types/org";
 import { usePermissions } from "../context/PermissionsContext";
+import { useDashboardPrefs, DashboardPrefs } from "../hooks/useDashboardPrefs";
 
 const matchesSearch = (kiosk: Kiosk, q: string): boolean => {
   if (!q) return true;
@@ -66,6 +76,13 @@ const OperationsPage: React.FC = () => {
     refresh: refreshPermissions,
   } = usePermissions();
   const { org, loading, error, refresh } = useOrganization();
+  const { alerts: activeAlerts, loading: alertsLoading } = useAlerts();
+  const {
+    commands: recentCommands,
+    loading: recentCommandsLoading,
+    error: recentCommandsError,
+    refresh: refreshRecentCommands,
+  } = useRecentCommands();
 
   const [selectedSiteId, setSelectedSiteId] = useState<string | "all">("all");
   const [selectedDeptId, setSelectedDeptId] = useState<string | "all">("all");
@@ -73,6 +90,8 @@ const OperationsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedKiosk, setSelectedKiosk] = useState<Kiosk | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [editMode, setEditMode] = useState<boolean>(false);
+  const { prefs, update: updatePrefs } = useDashboardPrefs();
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [hierarchyOpen, setHierarchyOpen] = useState<boolean>(() => {
     try {
@@ -109,6 +128,50 @@ const OperationsPage: React.FC = () => {
   } = useDashboardScope(dashboardScope);
 
   const commandsInProgress = useCommandsInProgress();
+
+  // Derive global issues from org data + context data (no extra API calls)
+  const globalIssues = useMemo<IssuesResponse | null>(() => {
+    if (!org) return null;
+
+    const allKiosks = org.sites.flatMap((s) =>
+      s.departments.flatMap((d) => d.kiosks)
+    );
+
+    const recentAlerts: IssueAlert[] = activeAlerts.slice(0, 10).map((a) => ({
+      id: a.id,
+      machineName: a.machineName,
+      type: a.type,
+      message: a.message,
+      createdAt: a.createdAt,
+    }));
+
+    const failedCommands: IssueCommand[] = recentCommands
+      .filter((c) => c.status.toLowerCase() === "failed")
+      .slice(0, 10)
+      .map((c) => ({
+        id: c.id,
+        machineName: c.machineName,
+        type: c.type,
+        createdAt: c.createdAt,
+        completedAt: c.completedAt,
+      }));
+
+    const problematicKiosks: ProblematicKiosk[] = allKiosks
+      .filter((k) => k.status.toLowerCase() !== "online")
+      .slice(0, 10)
+      .map((k) => ({
+        machineName: k.machineName,
+        status: k.status,
+        lastSeen: k.lastSeen ?? "",
+        activeAlerts: 0,
+        reason:
+          k.status.toLowerCase() === "offline"
+            ? "Not reachable"
+            : k.status,
+      }));
+
+    return { recentAlerts, failedCommands, problematicKiosks };
+  }, [org, activeAlerts, recentCommands]);
 
   useEffect(() => {
     if (org) setLastUpdated(new Date());
@@ -191,16 +254,48 @@ const OperationsPage: React.FC = () => {
     if (!org) return null;
 
     if (scopeKind === "global") {
+      const editWidgets: { key: keyof DashboardPrefs; label: string }[] = [
+        { key: "showKpis", label: "KPI Cards" },
+        { key: "showSiteGrid", label: "Site Overview" },
+        { key: "showIssues", label: "Issues Panel" },
+        { key: "showCommands", label: "Recent Commands" },
+      ];
+
       return (
         <>
-          <SummaryCards
-            scope="global"
-            global={globalSummary}
-            loading={summaryLoading}
-            commandsInProgress={commandsInProgress}
-          />
+          {editMode && (
+            <div className="dash-edit-bar">
+              <span className="dash-edit-bar__title">Visible widgets</span>
+              {editWidgets.map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`dash-edit-toggle${prefs[key] ? " is-on" : ""}`}
+                  onClick={() => updatePrefs({ [key]: !prefs[key] })}
+                  aria-pressed={prefs[key]}
+                >
+                  <span className="dash-edit-toggle__dot" />
+                  {label}
+                </button>
+              ))}
+              <button
+                className="btn btn--ghost dash-edit-bar__close"
+                onClick={() => setEditMode(false)}
+              >
+                Done
+              </button>
+            </div>
+          )}
 
-          {org.sites.length > 0 && (
+          {prefs.showKpis && (
+            <SummaryCards
+              scope="global"
+              global={globalSummary}
+              loading={summaryLoading}
+              commandsInProgress={commandsInProgress}
+            />
+          )}
+
+          {prefs.showSiteGrid && org.sites.length > 0 && (
             <section className="site-grid">
               {org.sites.map((s) => (
                 <SiteOverviewCard
@@ -212,13 +307,25 @@ const OperationsPage: React.FC = () => {
             </section>
           )}
 
-          <IssuesPanel
-            title="Recent issues · all sites"
-            issues={issues}
-            loading={summaryLoading}
-            onSelectMachine={selectKioskByName}
-            emptyMessage="Global issues feed is only populated when you drill into a site."
-          />
+          {prefs.showIssues && (
+            <IssuesPanel
+              title="Recent issues · all sites"
+              issues={globalIssues}
+              loading={!org || alertsLoading || recentCommandsLoading}
+              onSelectMachine={selectKioskByName}
+              emptyMessage="No active issues across all sites."
+            />
+          )}
+
+          {prefs.showCommands && (
+            <RecentCommandsPanel
+              commands={recentCommands}
+              loading={recentCommandsLoading}
+              error={recentCommandsError}
+              onRetry={refreshRecentCommands}
+              onSelectMachine={selectKioskByName}
+            />
+          )}
         </>
       );
     }
@@ -416,6 +523,8 @@ const OperationsPage: React.FC = () => {
           lastUpdated={lastUpdated}
           sidePanelOpen={hierarchyOpen}
           onToggleSidePanel={() => setHierarchyOpen((v) => !v)}
+          editDashboardActive={editMode}
+          onEditDashboard={scopeKind === "global" ? () => setEditMode((v) => !v) : undefined}
         />
 
         <div className="ops-content">
