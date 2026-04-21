@@ -89,6 +89,7 @@ const OperationsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedKiosk, setSelectedKiosk] = useState<Kiosk | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [editMode, setEditMode] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [hierarchyOpen, setHierarchyOpen] = useState<boolean>(() => {
     try {
@@ -265,7 +266,7 @@ const OperationsPage: React.FC = () => {
         onSelectMachine: selectKioskByName,
         onSelectSite: handleSelectSite,
       };
-      return <DashboardGrid ctx={dashCtx} />;
+      return <DashboardGrid ctx={dashCtx} editMode={editMode} onEditModeClose={() => setEditMode(false)} />;
     }
 
     if (scopeKind === "site") {
@@ -461,8 +462,8 @@ const OperationsPage: React.FC = () => {
           lastUpdated={lastUpdated}
           sidePanelOpen={hierarchyOpen}
           onToggleSidePanel={() => setHierarchyOpen((v) => !v)}
-          editDashboardActive={false}
-          onEditDashboard={undefined}
+          editDashboardActive={editMode && scopeKind === "global"}
+          onEditDashboard={scopeKind === "global" ? () => setEditMode((v) => !v) : undefined}
           sites={org?.sites.map((s) => ({ id: s.id, name: s.name })) ?? []}
           selectedSiteId={selectedSiteId}
           onSiteChange={handleSelectSite}
