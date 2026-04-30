@@ -221,6 +221,7 @@ const CommandsPage: React.FC = () => {
                   <th>Status</th>
                   <th>Machine</th>
                   <th>Type</th>
+                  <th>Issued By</th>
                   <th>Created</th>
                   <th>Completed</th>
                   <th className="td-right">Actions</th>
@@ -257,6 +258,9 @@ const CommandsPage: React.FC = () => {
                       </td>
                       <td>
                         <code className="cmd-type">{c.type}</code>
+                      </td>
+                      <td className="td-nowrap td-muted">
+                        {c.issuedByDisplayName || c.issuedByUsername || "—"}
                       </td>
                       <td className="td-nowrap">{formatTime(c.createdAt)}</td>
                       <td className="td-nowrap">

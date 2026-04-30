@@ -8,7 +8,10 @@ export type WidgetType =
   | "attention"
   | "issues"
   | "commands"
-  | "site-grid";
+  | "site-grid"
+  | "alerts-feed"
+  | "quick-actions"
+  | "trend-chart";
 
 export interface DashboardState {
   layouts: LayoutItem[];

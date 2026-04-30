@@ -18,9 +18,21 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
     ?? throw new InvalidOperationException(
         "Connection string 'DefaultConnection' not configured.");
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Development uses SQLite for zero-config setup.
+// Production uses SQL Server — set ConnectionStrings:DefaultConnection in env/secrets.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseSqlite(connectionString));
+}
+else
+{
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseSqlServer(connectionString));
+}
 
+builder.Services.AddHttpClient("alert-delivery");
+builder.Services.AddSingleton<IAlertDeliveryService, AlertDeliveryService>();
 builder.Services.AddScoped<IMachineService, MachineService>();
 builder.Services.AddScoped<ILogService, LogService>();
 builder.Services.AddScoped<ICommandService, CommandService>();
@@ -29,6 +41,9 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddSingleton<IRealtimeNotifier, RealtimeNotifier>();
 builder.Services.AddSignalR();
 builder.Services.AddHostedService<OfflineAlertWorker>();
+builder.Services.AddHostedService<SchedulerWorker>();
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("database");
 
 builder.Services.AddCors(options =>
 {
@@ -99,6 +114,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowFrontend");
+
+app.MapHealthChecks("/health").AllowAnonymous();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -199,19 +216,22 @@ app.MapGet("/api/kiosks/{machineName}/logs",
         Results.Ok(await service.GetByMachineAsync(machineName, ct)))
     .RequireAuthorization(KioskPolicies.RequireViewer);
 
-app.MapPost("/api/commands", async (CreateCommandRequest request, ICommandService service) =>
+app.MapPost("/api/commands", async (CreateCommandRequest request, ICommandService service, HttpContext ctx) =>
 {
     if (string.IsNullOrWhiteSpace(request.MachineName))
-    {
         return Results.BadRequest("machineName is required");
-    }
 
     if (string.IsNullOrWhiteSpace(request.Type))
-    {
         return Results.BadRequest("type is required");
-    }
 
-    var command = await service.EnqueueAsync(request);
+    var userInfo = CurrentUser.From(ctx.User);
+    var displayName = string.IsNullOrWhiteSpace(userInfo.Domain)
+        ? userInfo.Username
+        : $"{userInfo.Domain}\\{userInfo.Username}";
+    var ip = ctx.Connection.RemoteIpAddress?.ToString();
+    var issuer = new CommandIssuer(userInfo.Username, displayName, ip);
+
+    var command = await service.EnqueueAsync(request, issuer);
     return Results.Created($"/api/commands/{command.Id}", command);
 }).RequireAuthorization(KioskPolicies.RequireOperator);
 
@@ -664,6 +684,130 @@ app.MapGet("/api/kiosks/{machineName}/processes",
         return Results.Ok(processes);
     }).RequireAuthorization(KioskPolicies.RequireViewer);
 
+// ── Kiosk Assignment ──────────────────────────────────────────────────────────
+
+app.MapGet("/api/kiosks/unassigned", async (AppDbContext db, CancellationToken ct) =>
+{
+    var now = DateTime.UtcNow;
+    var online = MachineService.OnlineThreshold;
+    var kiosks = await db.Kiosks
+        .AsNoTracking()
+        .Where(k => k.SiteId == null && k.DepartmentId == null)
+        .OrderBy(k => k.MachineName)
+        .ToListAsync(ct);
+
+    return Results.Ok(kiosks.Select(k => new MachineStatus
+    {
+        MachineName = k.MachineName,
+        IpAddress = k.IpAddress,
+        LastSeen = k.LastSeen,
+        Status = (now - k.LastSeen) <= online ? "Online" : "Offline",
+        SiteId = null,
+        DepartmentId = null
+    }));
+}).RequireAuthorization(KioskPolicies.RequireViewer);
+
+app.MapPost("/api/kiosks/bulk-assign",
+    async (BulkAssignRequest request, AppDbContext db, IRealtimeNotifier realtime, CancellationToken ct) =>
+    {
+        if (request.MachineNames is null or { Count: 0 })
+            return Results.BadRequest("machineNames is required");
+
+        if (request.SiteId is Guid siteId)
+        {
+            if (!await db.Sites.AnyAsync(s => s.Id == siteId, ct))
+                return Results.BadRequest("Unknown siteId");
+        }
+
+        if (request.DepartmentId is Guid deptId)
+        {
+            var dept = await db.Departments.FirstOrDefaultAsync(d => d.Id == deptId, ct);
+            if (dept is null) return Results.BadRequest("Unknown departmentId");
+            if (request.SiteId is Guid sid && dept.SiteId != sid)
+                return Results.BadRequest("Department does not belong to the provided site");
+        }
+
+        var kiosks = await db.Kiosks
+            .Where(k => request.MachineNames.Contains(k.MachineName))
+            .ToListAsync(ct);
+
+        foreach (var kiosk in kiosks)
+        {
+            kiosk.SiteId = request.SiteId;
+            kiosk.DepartmentId = request.DepartmentId;
+
+            if (kiosk.DepartmentId is not null && kiosk.SiteId is null)
+            {
+                var dept = await db.Departments.FindAsync(new object?[] { kiosk.DepartmentId }, ct);
+                if (dept is not null) kiosk.SiteId = dept.SiteId;
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        foreach (var kiosk in kiosks)
+            await realtime.MachineUpdatedAsync(kiosk.MachineName, kiosk.Status, kiosk.LastSeen, ct);
+
+        return Results.Ok(new { updated = kiosks.Count });
+    }).RequireAuthorization(KioskPolicies.RequireOperator);
+
+// ── Agent Schedules ───────────────────────────────────────────────────────────
+
+app.MapGet("/api/schedules", async (AppDbContext db, string? machineName, CancellationToken ct) =>
+{
+    var query = db.AgentSchedules.AsNoTracking().AsQueryable();
+    if (!string.IsNullOrWhiteSpace(machineName))
+        query = query.Where(s => s.MachineName == machineName);
+    var schedules = await query.OrderBy(s => s.MachineName).ThenBy(s => s.CommandType).ToListAsync(ct);
+    return Results.Ok(schedules);
+}).RequireAuthorization(KioskPolicies.RequireOperator);
+
+app.MapPost("/api/schedules", async (CreateScheduleRequest req, AppDbContext db, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(req.MachineName)) return Results.BadRequest("machineName is required");
+    if (string.IsNullOrWhiteSpace(req.CommandType)) return Results.BadRequest("commandType is required");
+    if (req.IntervalSeconds < 60) return Results.BadRequest("intervalSeconds must be >= 60");
+
+    var schedule = new AgentSchedule
+    {
+        MachineName = req.MachineName,
+        CommandType = req.CommandType,
+        Payload = req.Payload,
+        IntervalSeconds = req.IntervalSeconds,
+        IsEnabled = true,
+        NextRunAt = DateTime.UtcNow
+    };
+    db.AgentSchedules.Add(schedule);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/schedules/{schedule.Id}", schedule);
+}).RequireAuthorization(KioskPolicies.RequireOperator);
+
+app.MapPatch("/api/schedules/{id:guid}", async (Guid id, UpdateScheduleRequest req, AppDbContext db, CancellationToken ct) =>
+{
+    var schedule = await db.AgentSchedules.FirstOrDefaultAsync(s => s.Id == id, ct);
+    if (schedule is null) return Results.NotFound();
+
+    if (req.IsEnabled.HasValue) schedule.IsEnabled = req.IsEnabled.Value;
+    if (req.IntervalSeconds.HasValue)
+    {
+        if (req.IntervalSeconds.Value < 60) return Results.BadRequest("intervalSeconds must be >= 60");
+        schedule.IntervalSeconds = req.IntervalSeconds.Value;
+    }
+    if (req.Payload is not null) schedule.Payload = req.Payload;
+
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(schedule);
+}).RequireAuthorization(KioskPolicies.RequireOperator);
+
+app.MapDelete("/api/schedules/{id:guid}", async (Guid id, AppDbContext db, CancellationToken ct) =>
+{
+    var schedule = await db.AgentSchedules.FirstOrDefaultAsync(s => s.Id == id, ct);
+    if (schedule is null) return Results.NotFound();
+    db.AgentSchedules.Remove(schedule);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+}).RequireAuthorization(KioskPolicies.RequireAdmin);
+
 app.MapHub<KioskHub>("/hubs/kiosk");
 
 // Dashboard layout persistence (file-based per user)
@@ -692,6 +836,7 @@ app.MapPost("/api/dashboard/layout", async (SaveLayoutRequest req, HttpContext c
 app.Run();
 
 public record AssignKioskRequest(Guid? SiteId, Guid? DepartmentId);
+public record BulkAssignRequest(List<string> MachineNames, Guid? SiteId, Guid? DepartmentId);
 
 public record EventLogEntryDto(
     string LogName,

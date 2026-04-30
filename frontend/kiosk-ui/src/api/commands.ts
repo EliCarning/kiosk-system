@@ -26,6 +26,9 @@ function normalizeCommand(raw: any): KioskCommand {
     status,
     createdAt: pick<string>(raw, "createdAt", "CreatedAt") ?? "",
     completedAt: pick<string>(raw, "completedAt", "CompletedAt") ?? null,
+    issuedByUsername: pick<string>(raw, "issuedByUsername", "IssuedByUsername") ?? null,
+    issuedByDisplayName: pick<string>(raw, "issuedByDisplayName", "IssuedByDisplayName") ?? null,
+    issuedFromIp: pick<string>(raw, "issuedFromIp", "IssuedFromIp") ?? null,
   };
 }
 

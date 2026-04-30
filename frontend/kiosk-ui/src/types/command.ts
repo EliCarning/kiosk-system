@@ -18,6 +18,9 @@ export interface KioskCommand {
   status: CommandStatus;
   createdAt: string;
   completedAt: string | null;
+  issuedByUsername: string | null;
+  issuedByDisplayName: string | null;
+  issuedFromIp: string | null;
 }
 
 export interface CreateCommandRequest {

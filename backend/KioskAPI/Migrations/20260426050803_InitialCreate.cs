@@ -6,11 +6,30 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace KioskAPI.Migrations
 {
     /// <inheritdoc />
-    public partial class Initial : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.CreateTable(
+                name: "AgentSchedules",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
+                    MachineName = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
+                    CommandType = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
+                    Payload = table.Column<string>(type: "TEXT", nullable: true),
+                    IntervalSeconds = table.Column<int>(type: "INTEGER", nullable: false),
+                    IsEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
+                    LastRunAt = table.Column<DateTime>(type: "TEXT", nullable: true),
+                    NextRunAt = table.Column<DateTime>(type: "TEXT", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AgentSchedules", x => x.Id);
+                });
+
             migrationBuilder.CreateTable(
                 name: "Alerts",
                 columns: table => new
@@ -38,7 +57,10 @@ namespace KioskAPI.Migrations
                     Payload = table.Column<string>(type: "TEXT", nullable: true),
                     Status = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true)
+                    CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
+                    IssuedByUsername = table.Column<string>(type: "TEXT", maxLength: 200, nullable: true),
+                    IssuedByDisplayName = table.Column<string>(type: "TEXT", maxLength: 300, nullable: true),
+                    IssuedFromIp = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -216,6 +238,16 @@ namespace KioskAPI.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_AgentSchedules_MachineName_IsEnabled",
+                table: "AgentSchedules",
+                columns: new[] { "MachineName", "IsEnabled" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AgentSchedules_NextRunAt",
+                table: "AgentSchedules",
+                column: "NextRunAt");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Alerts_CreatedAt",
                 table: "Alerts",
                 column: "CreatedAt");
@@ -302,6 +334,9 @@ namespace KioskAPI.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "AgentSchedules");
+
             migrationBuilder.DropTable(
                 name: "Alerts");
 

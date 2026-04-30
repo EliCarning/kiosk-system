@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     public DbSet<RdpSession> RdpSessions => Set<RdpSession>();
     public DbSet<WindowsService> WindowsServices => Set<WindowsService>();
     public DbSet<WindowsProcess> WindowsProcesses => Set<WindowsProcess>();
+    public DbSet<AgentSchedule> AgentSchedules => Set<AgentSchedule>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -64,6 +65,9 @@ public class AppDbContext : DbContext
             entity.Property(c => c.MachineName).IsRequired().HasMaxLength(200);
             entity.Property(c => c.Type).IsRequired().HasMaxLength(100);
             entity.Property(c => c.Status).IsRequired().HasMaxLength(32);
+            entity.Property(c => c.IssuedByUsername).HasMaxLength(200);
+            entity.Property(c => c.IssuedByDisplayName).HasMaxLength(300);
+            entity.Property(c => c.IssuedFromIp).HasMaxLength(64);
             entity.HasIndex(c => new { c.MachineName, c.Status });
             entity.HasIndex(c => c.CreatedAt);
         });
@@ -139,6 +143,15 @@ public class AppDbContext : DbContext
             entity.Property(p => p.MachineName).IsRequired().HasMaxLength(200);
             entity.Property(p => p.ProcessName).IsRequired().HasMaxLength(200);
             entity.HasIndex(p => new { p.MachineName, p.CollectedAt });
+        });
+
+        modelBuilder.Entity<AgentSchedule>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.MachineName).IsRequired().HasMaxLength(200);
+            entity.Property(s => s.CommandType).IsRequired().HasMaxLength(100);
+            entity.HasIndex(s => new { s.MachineName, s.IsEnabled });
+            entity.HasIndex(s => s.NextRunAt);
         });
     }
 }

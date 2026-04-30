@@ -133,5 +133,13 @@ export function useDashboardLayout() {
     persist(DEFAULT_STATE);
   }, [persist]);
 
-  return { state, updateLayouts, addWidget, removeWidget, resetToDefault };
+  const applyPreset = useCallback(
+    (preset: DashboardState) => {
+      setState(preset);
+      persist(preset);
+    },
+    [persist]
+  );
+
+  return { state, updateLayouts, addWidget, removeWidget, resetToDefault, applyPreset };
 }

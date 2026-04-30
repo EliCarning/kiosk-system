@@ -75,6 +75,9 @@ const CommandHistory: React.FC<CommandHistoryProps> = ({
               {c.completedAt && (
                 <span> · done {formatDate(c.completedAt)}</span>
               )}
+              {(c.issuedByDisplayName || c.issuedByUsername) && (
+                <span> · by {c.issuedByDisplayName || c.issuedByUsername}</span>
+              )}
             </div>
           </li>
         );

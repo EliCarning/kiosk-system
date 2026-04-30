@@ -56,6 +56,33 @@ export const WIDGET_REGISTRY: Record<WidgetType, WidgetMeta> = {
     minW: 6,
     minH: 3,
   },
+  "alerts-feed": {
+    type: "alerts-feed",
+    label: "Live Alerts Feed",
+    description: "Real-time stream of active alerts across the fleet",
+    defaultW: 6,
+    defaultH: 7,
+    minW: 4,
+    minH: 4,
+  },
+  "quick-actions": {
+    type: "quick-actions",
+    label: "Quick Actions",
+    description: "Fire commands directly at any machine from the dashboard",
+    defaultW: 6,
+    defaultH: 7,
+    minW: 4,
+    minH: 4,
+  },
+  "trend-chart": {
+    type: "trend-chart",
+    label: "Online Trend",
+    description: "Time-series chart of fleet online status",
+    defaultW: 12,
+    defaultH: 5,
+    minW: 6,
+    minH: 3,
+  },
 };
 
 export const WIDGET_ORDER: WidgetType[] = [
@@ -64,4 +91,7 @@ export const WIDGET_ORDER: WidgetType[] = [
   "site-grid",
   "issues",
   "commands",
+  "alerts-feed",
+  "quick-actions",
+  "trend-chart",
 ];

@@ -1,14 +1,22 @@
 import React from "react";
+import { Responsive } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
 
-import type { DashboardContext } from "./types";
-import { useDashboardPrefs, type DashboardPrefs } from "../hooks/useDashboardPrefs";
-import DashboardKpiRow from "./DashboardKpiRow";
-import OnlineTrendChart from "./charts/OnlineTrendChart";
-import CommandStatusChart from "./charts/CommandStatusChart";
-import AlertsByTypeChart from "./charts/AlertsByTypeChart";
-import IssuesWidget from "./widgets/IssuesWidget";
-import SiteGridWidget from "./widgets/SiteGridWidget";
+import type { DashboardContext, WidgetType } from "./types";
+import { useDashboardLayout } from "../hooks/useDashboardLayout";
+import { WIDGET_REGISTRY } from "./widgetRegistry";
+import DashboardToolbar from "./DashboardToolbar";
+
 import AttentionWidget from "./widgets/AttentionWidget";
+import StatsWidget from "./widgets/StatsWidget";
+import IssuesWidget from "./widgets/IssuesWidget";
+import CommandsWidget from "./widgets/CommandsWidget";
+import SiteGridWidget from "./widgets/SiteGridWidget";
+import AlertsFeedWidget from "./widgets/AlertsFeedWidget";
+import QuickActionsWidget from "./widgets/QuickActionsWidget";
+import TrendChartWidget from "./widgets/TrendChartWidget";
+
+const RGL = Responsive;
 
 interface Props {
   ctx: DashboardContext;
@@ -16,103 +24,126 @@ interface Props {
   onEditModeClose?: () => void;
 }
 
-const EDIT_WIDGETS: { key: keyof DashboardPrefs; label: string }[] = [
-  { key: "showKpis",     label: "KPI Cards" },
-  { key: "showSiteGrid", label: "Site Overview" },
-  { key: "showIssues",   label: "Issues Panel" },
-  { key: "showCommands", label: "Charts" },
-];
+const WIDGET_TITLES: Record<WidgetType, string> = {
+  stats: "KPI Stats",
+  attention: "Needs Attention",
+  issues: "Issues Panel",
+  commands: "Recent Commands",
+  "site-grid": "Site Overview",
+  "alerts-feed": "Live Alerts",
+  "quick-actions": "Quick Actions",
+  "trend-chart": "Online Trend",
+};
 
-const DashboardGrid: React.FC<Props> = ({ ctx, editMode = false, onEditModeClose }) => {
-  const { prefs, update: updatePrefs } = useDashboardPrefs();
+const renderWidgetContent = (
+  type: WidgetType,
+  ctx: DashboardContext
+): React.ReactNode => {
+  switch (type) {
+    case "stats":
+      return <StatsWidget ctx={ctx} />;
+    case "attention":
+      return <AttentionWidget ctx={ctx} />;
+    case "issues":
+      return <IssuesWidget ctx={ctx} />;
+    case "commands":
+      return <CommandsWidget ctx={ctx} />;
+    case "site-grid":
+      return <SiteGridWidget ctx={ctx} />;
+    case "alerts-feed":
+      return <AlertsFeedWidget ctx={ctx} />;
+    case "quick-actions":
+      return <QuickActionsWidget ctx={ctx} />;
+    case "trend-chart":
+      return <TrendChartWidget ctx={ctx} />;
+    default:
+      return null;
+  }
+};
 
-  const hasAttention =
-    ctx.globalSummary &&
-    (ctx.globalSummary.offlineKiosks > 0 ||
-      ctx.globalSummary.activeAlerts > 0 ||
-      ctx.globalSummary.failedCommandsLast24h > 0);
+const DashboardGrid: React.FC<Props> = ({
+  ctx,
+  editMode = false,
+  onEditModeClose,
+}) => {
+  const {
+    state,
+    updateLayouts,
+    addWidget,
+    removeWidget,
+    resetToDefault,
+    applyPreset,
+  } = useDashboardLayout();
 
   return (
-    <div className="dash-pro">
-
-      {/* Edit mode toolbar */}
+    <div className="dash-grid-root w-full">
       {editMode && (
-        <div className="dash-edit-bar">
-          <span className="dash-edit-bar__title">Visible sections</span>
-          {EDIT_WIDGETS.map(({ key, label }) => (
-            <button
-              key={key}
-              className={`dash-edit-toggle${prefs[key] ? " is-on" : ""}`}
-              onClick={() => updatePrefs({ [key]: !prefs[key] })}
-              aria-pressed={prefs[key]}
+        <DashboardToolbar
+          state={state}
+          onAddWidget={(type) => addWidget(type, WIDGET_REGISTRY[type])}
+          onResetToDefault={resetToDefault}
+          onApplyPreset={applyPreset}
+          onClose={onEditModeClose ?? (() => {})}
+        />
+      )}
+
+      <RGL
+        className="layout"
+        width={window.innerWidth - 320}
+        layouts={{ lg: state.layouts }}
+        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+        cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
+        rowHeight={60}
+        margin={[16, 16]}
+        containerPadding={[0, 0]}
+        onLayoutChange={(_, allLayouts) => updateLayouts(allLayouts.lg ?? [])}
+        isDraggable={editMode}
+        isResizable={editMode}
+        draggableHandle=".widget-handle"
+        resizeHandles={["se"]}
+        useCSSTransforms
+        compactType="vertical"
+        preventCollision={false}
+      >
+        {state.layouts.map((l) => {
+          const type = state.types[l.i];
+          if (!type) return null;
+
+          return (
+            <div
+              key={l.i}
+              className={`widget-cell${
+                editMode ? " widget-cell--editing" : ""
+              }`}
             >
-              <span className="dash-edit-toggle__dot" />
-              {label}
-            </button>
-          ))}
-          <button
-            className="btn btn--ghost dash-edit-bar__close"
-            onClick={onEditModeClose}
-          >
-            Done
-          </button>
-        </div>
-      )}
+              {editMode && (
+                <div className="widget-handle">
+                  <span className="widget-handle__icon">⠿</span>
+                  <span className="widget-handle__title">
+                    {WIDGET_TITLES[type] ?? type}
+                  </span>
+                  <button
+                    className="widget-handle__remove"
+                    onClick={() => removeWidget(l.i)}
+                    title="Remove widget"
+                    type="button"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
 
-      {/* Row 0: Attention banner (conditional) */}
-      {hasAttention && (
-        <div className="dash-pro__banner">
-          <AttentionWidget ctx={ctx} />
-        </div>
-      )}
-
-      {/* Row 1: KPI Cards */}
-      {prefs.showKpis && (
-        <DashboardKpiRow
-          summary={ctx.globalSummary}
-          commandsInProgress={ctx.commandsInProgress}
-          loading={ctx.summaryLoading}
-        />
-      )}
-
-      {/* Row 2: Full-width trend chart */}
-      {prefs.showCommands && (
-        <OnlineTrendChart
-          globalSummary={ctx.globalSummary}
-          loading={ctx.summaryLoading}
-        />
-      )}
-
-      {/* Row 3: Two charts side by side */}
-      {prefs.showCommands && (
-        <div className="dash-pro__row dash-pro__row--half">
-          <CommandStatusChart
-            commands={ctx.recentCommands}
-            loading={ctx.recentCommandsLoading}
-          />
-          <AlertsByTypeChart
-            globalIssues={ctx.globalIssues}
-            loading={ctx.summaryLoading || ctx.alertsLoading}
-          />
-        </div>
-      )}
-
-      {/* Row 4: Issues panel + Site grid */}
-      <div className="dash-pro__row dash-pro__row--issues">
-        {prefs.showIssues && <IssuesWidget ctx={ctx} />}
-        {prefs.showSiteGrid && ctx.org && ctx.org.sites.length > 0 && (
-          <div className="dash-pro__sites">
-            <div className="chart-card__head chart-card__head--standalone">
-              <span className="chart-card__title">Sites</span>
-              <span className="chart-card__sub">
-                {ctx.org.sites.length} site{ctx.org.sites.length === 1 ? "" : "s"}
-              </span>
+              <div
+                className={`widget-body${
+                  editMode ? " widget-body--editing" : ""
+                }`}
+              >
+                {renderWidgetContent(type, ctx)}
+              </div>
             </div>
-            <SiteGridWidget ctx={ctx} />
-          </div>
-        )}
-      </div>
-
+          );
+        })}
+      </RGL>
     </div>
   );
 };

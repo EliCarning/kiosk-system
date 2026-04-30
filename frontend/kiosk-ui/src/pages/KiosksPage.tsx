@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useOrganization } from "../hooks/useOrganization";
 import { createCommand } from "../api/actions";
+import { bulkAssignKiosks, fetchUnassignedKiosks } from "../api/machines";
 import { Kiosk } from "../types/org";
 import { CommandType } from "../types/command";
 import StatusBadge from "../components/StatusBadge";
@@ -24,7 +25,7 @@ const BULK_ACTIONS: BulkActionDef[] = [
   { type: "reboot", label: "Reboot", danger: true, requiresConfirm: true },
 ];
 
-type StatusFilter = "all" | "online" | "offline" | "warning";
+type StatusFilter = "all" | "online" | "offline" | "warning" | "unassigned";
 
 const formatRelative = (iso: string | null): string => {
   if (!iso) return "—";
@@ -62,12 +63,42 @@ const KiosksPage: React.FC = () => {
   const [executing, setExecuting] = useState<CommandType | null>(null);
   const [result, setResult] = useState<BulkResult | null>(null);
 
+  // Unassigned kiosks (no site/department) fetched separately
+  const [unassigned, setUnassigned] = useState<Kiosk[]>([]);
+  const [assignSiteId, setAssignSiteId] = useState<string>("");
+  const [assignDeptId, setAssignDeptId] = useState<string>("");
+  const [assigning, setAssigning] = useState(false);
+
+  useEffect(() => {
+    fetchUnassignedKiosks()
+      .then((machines) =>
+        setUnassigned(
+          machines.map((m) => ({
+            id: m.machineName,
+            machineName: m.machineName,
+            displayName: m.machineName,
+            ipAddress: m.ipAddress,
+            status: m.status,
+            lastSeen: m.lastSeen,
+            siteId: null,
+            departmentId: null,
+            checks: [],
+            history: [],
+            browser: { name: "", version: "", running: false },
+            network: { gateway: "", dns: "", latencyMs: null },
+            gpo: { lastApplied: null, version: "" },
+          }))
+        )
+      )
+      .catch(() => {});
+  }, []);
+
   const allKiosks = useMemo<Kiosk[]>(() => {
-    if (!org) return [];
-    return org.sites.flatMap((s) =>
-      s.departments.flatMap((d) => d.kiosks)
-    );
-  }, [org]);
+    const assigned = org
+      ? org.sites.flatMap((s) => s.departments.flatMap((d) => d.kiosks))
+      : [];
+    return [...assigned, ...unassigned];
+  }, [org, unassigned]);
 
   const siteLookup = useMemo(() => {
     const map = new Map<string, { site: string; department: string }>();
@@ -85,7 +116,9 @@ const KiosksPage: React.FC = () => {
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return allKiosks.filter((k) => {
-      if (statusFilter !== "all") {
+      if (statusFilter === "unassigned") {
+        if (k.siteId || k.departmentId) return false;
+      } else if (statusFilter !== "all") {
         const s = k.status.toLowerCase();
         if (statusFilter === "warning") {
           if (s !== "warning" && s !== "degraded") return false;
@@ -174,6 +207,52 @@ const KiosksPage: React.FC = () => {
     [executing, selected]
   );
 
+  const handleAssign = useCallback(async () => {
+    if (assigning || selected.size === 0) return;
+    setAssigning(true);
+    try {
+      const { updated } = await bulkAssignKiosks(
+        Array.from(selected),
+        assignSiteId || null,
+        assignDeptId || null
+      );
+      setResult({ label: "Assign", success: updated, failed: 0, total: updated });
+      clearSelection();
+      setUnassigned([]);
+      refresh();
+      fetchUnassignedKiosks()
+        .then((machines) =>
+          setUnassigned(
+            machines.map((m) => ({
+              id: m.machineName,
+              machineName: m.machineName,
+              displayName: m.machineName,
+              ipAddress: m.ipAddress,
+              status: m.status,
+              lastSeen: m.lastSeen,
+              siteId: null,
+              departmentId: null,
+              checks: [],
+              history: [],
+              browser: { name: "", version: "", running: false },
+              network: { gateway: "", dns: "", latencyMs: null },
+              gpo: { lastApplied: null, version: "" },
+            }))
+          )
+        )
+        .catch(() => {});
+    } catch (e) {
+      setResult({
+        label: "Assign",
+        success: 0,
+        failed: selected.size,
+        total: selected.size,
+      });
+    } finally {
+      setAssigning(false);
+    }
+  }, [assigning, selected, assignSiteId, assignDeptId, refresh]);
+
   const selectAllRef = useCallback(
     (node: HTMLInputElement | null) => {
       if (node) node.indeterminate = visibleSomeSelected;
@@ -212,6 +291,39 @@ const KiosksPage: React.FC = () => {
               </button>
             );
           })}
+          <span className="bulk-bar__sep" />
+          <select
+            className="select select--sm"
+            value={assignSiteId}
+            onChange={(e) => { setAssignSiteId(e.target.value); setAssignDeptId(""); }}
+            title="Assign to site"
+          >
+            <option value="">— Site —</option>
+            {org?.sites.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+          <select
+            className="select select--sm"
+            value={assignDeptId}
+            onChange={(e) => setAssignDeptId(e.target.value)}
+            title="Assign to department"
+          >
+            <option value="">— Dept —</option>
+            {org?.sites
+              .find((s) => s.id === assignSiteId)
+              ?.departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+          </select>
+          <button
+            className={`btn${assigning ? " is-loading" : ""}`}
+            onClick={handleAssign}
+            disabled={assigning || (!assignSiteId && !assignDeptId)}
+            title="Assign selected kiosks to site/department"
+          >
+            {assigning ? "Assigning…" : "Assign"}
+          </button>
         </div>
       </div>
     );
@@ -383,6 +495,7 @@ const KiosksPage: React.FC = () => {
           <option value="online">Online</option>
           <option value="offline">Offline</option>
           <option value="warning">Warning</option>
+          <option value="unassigned">Unassigned {unassigned.length > 0 ? `(${unassigned.length})` : ""}</option>
         </select>
       </div>
 

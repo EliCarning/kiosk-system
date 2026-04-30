@@ -17,7 +17,7 @@ public class CommandService : ICommandService
         _realtime = realtime;
     }
 
-    public async Task<Command> EnqueueAsync(CreateCommandRequest request, CancellationToken ct = default)
+    public async Task<Command> EnqueueAsync(CreateCommandRequest request, CommandIssuer? issuer = null, CancellationToken ct = default)
     {
         var command = new Command
         {
@@ -27,7 +27,10 @@ public class CommandService : ICommandService
             Payload = request.Payload,
             Status = CommandStatuses.Pending,
             CreatedAt = DateTime.UtcNow,
-            CompletedAt = null
+            CompletedAt = null,
+            IssuedByUsername = issuer?.Username,
+            IssuedByDisplayName = issuer?.DisplayName,
+            IssuedFromIp = issuer?.IpAddress
         };
 
         _db.Commands.Add(command);

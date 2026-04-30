@@ -36,6 +36,17 @@ public class Worker : BackgroundService
         }
     }
 
+    private static readonly string AgentVersion =
+        System.Reflection.Assembly.GetExecutingAssembly()
+            .GetName().Version?.ToString() ?? "1.0.0";
+
+    private static readonly string StatusFilePath =
+        Path.Combine(Path.GetTempPath(), "kiosk-agent-status.json");
+
+    private DateTime _startedAt = DateTime.UtcNow;
+    private DateTime _lastHeartbeatAt;
+    private DateTime _lastCommandAt;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var backendBaseUrl = _configuration["Backend:BaseUrl"]?.TrimEnd('/')
@@ -45,6 +56,8 @@ public class Worker : BackgroundService
         var heartbeatUrl = $"{backendBaseUrl}/api/heartbeat";
         var logsUrl = $"{backendBaseUrl}/api/logs";
         var pendingCommandsUrl = $"{backendBaseUrl}/api/commands/{Uri.EscapeDataString(machineName)}/pending";
+
+        _startedAt = DateTime.UtcNow;
 
         _logger.LogInformation(
             "Kiosk agent started. Backend: {Url}, Machine: {Machine}",
@@ -56,6 +69,7 @@ public class Worker : BackgroundService
         {
             await SendHeartbeatAsync(heartbeatUrl, logsUrl, stoppingToken);
             await ProcessPendingCommandsAsync(pendingCommandsUrl, backendBaseUrl, logsUrl, stoppingToken);
+            WriteStatusFile(machineName);
 
             try
             {
@@ -65,6 +79,29 @@ public class Worker : BackgroundService
             {
                 break;
             }
+        }
+    }
+
+    private void WriteStatusFile(string machineName)
+    {
+        try
+        {
+            var status = new
+            {
+                machineName,
+                agentVersion = AgentVersion,
+                startedAt = _startedAt,
+                lastHeartbeatAt = _lastHeartbeatAt == default ? (DateTime?)null : _lastHeartbeatAt,
+                lastCommandAt = _lastCommandAt == default ? (DateTime?)null : _lastCommandAt,
+                writtenAt = DateTime.UtcNow
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(status,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
+            File.WriteAllText(StatusFilePath, json);
+        }
+        catch
+        {
+            // Status file is best-effort; never fail the main loop
         }
     }
 
@@ -85,7 +122,11 @@ public class Worker : BackgroundService
 
             var response = await _httpClient.PostAsJsonAsync(heartbeatUrl, payload, stoppingToken);
 
-            if (!response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode)
+            {
+                _lastHeartbeatAt = DateTime.UtcNow;
+            }
+            else
             {
                 _logger.LogWarning("Heartbeat failed with status {Status}", response.StatusCode);
                 await SendLogAsync(logsUrl, "Error",
@@ -120,6 +161,7 @@ public class Worker : BackgroundService
 
         if (commands is null || commands.Count == 0) return;
 
+        _lastCommandAt = DateTime.UtcNow;
         _logger.LogInformation("Received {Count} pending command(s)", commands.Count);
 
         foreach (var command in commands)
@@ -148,33 +190,41 @@ public class Worker : BackgroundService
             switch (type.ToLowerInvariant())
             {
                 case "ping":
-                    level = "Info";
-                    message = "Ping received";
+                    (success, message) = await ExecutePingAsync(command.Payload, stoppingToken);
+                    level = success ? "Info" : "Error";
                     break;
 
                 case "refresh_cache":
-                    level = "Info";
-                    message = "Refresh cache simulated";
+                    (success, message) = ExecuteRefreshCache(command.Payload);
+                    level = success ? "Info" : "Warning";
                     break;
 
                 case "restart_service":
-                    level = "Info";
-                    message = "Restart service simulated";
+                    (success, message) = await ExecuteRestartServiceAsync(command.Payload, stoppingToken);
+                    level = success ? "Info" : "Error";
                     break;
 
                 case "restart_browser":
-                    level = "Info";
-                    message = "Restart browser simulated";
+                    (success, message) = await ExecuteRestartBrowserAsync(command.Payload, stoppingToken);
+                    level = success ? "Info" : "Warning";
                     break;
 
                 case "gpupdate":
-                    level = "Info";
-                    message = "GPUpdate simulated";
+                    (success, message) = await ExecuteGpUpdateAsync(stoppingToken);
+                    level = success ? "Info" : "Error";
                     break;
 
                 case "reboot":
-                    level = "Info";
-                    message = "Reboot simulated";
+                    // ExecuteRebootAsync completes the command itself (before machine goes down)
+                    (success, message) = await ExecuteRebootAsync(command.Payload, backendBaseUrl, command.Id, logsUrl, stoppingToken);
+                    level = success ? "Warning" : "Error";
+                    if (success)
+                    {
+                        // Command already completed inside ExecuteRebootAsync
+                        await SendLogAsync(logsUrl, level, message, stoppingToken);
+                        _applicationLifetime.StopApplication();
+                        return;
+                    }
                     break;
 
                 case "collect_system_info":
@@ -251,6 +301,285 @@ public class Worker : BackgroundService
             _applicationLifetime.StopApplication();
         }
     }
+
+    // ── Real command execution ────────────────────────────────────────────────
+
+    private async Task<(bool, string)> ExecutePingAsync(string? payload, CancellationToken ct)
+    {
+        var target = "127.0.0.1";
+        if (!string.IsNullOrWhiteSpace(payload))
+        {
+            try
+            {
+                var opts = JsonSerializer.Deserialize<Dictionary<string, string>>(payload,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (opts is not null && opts.TryGetValue("target", out var t) && !string.IsNullOrWhiteSpace(t))
+                    target = t;
+            }
+            catch { }
+        }
+
+        // Reject anything that looks like command injection
+        if (target.Any(c => c is '&' or '|' or ';' or '\n' or '\r' or '`' or '$'))
+            return (false, "Invalid ping target");
+
+        var args = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? $"-n 1 {target}"
+            : $"-c 1 {target}";
+
+        var (exit, stdout, stderr) = await RunProcessAsync("ping", args,
+            _configuration.GetValue("Commands:CommandTimeoutSeconds", 15), ct);
+
+        var output = (stdout + stderr).Trim();
+        return (exit == 0, $"Ping {target}: {(exit == 0 ? "reachable" : "unreachable")}. {TruncateOutput(output)}");
+    }
+
+    private (bool, string) ExecuteRefreshCache(string? payload)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return (true, "Cache clear skipped on non-Windows");
+
+        var paths = _configuration.GetSection("Commands:CachePaths").Get<string[]>()
+            ?? new[] { "%TEMP%", "%LOCALAPPDATA%\\Temp" };
+
+        var deleted = 0;
+        var skipped = 0;
+        var errors = new List<string>();
+
+        foreach (var rawPath in paths)
+        {
+            var expanded = Environment.ExpandEnvironmentVariables(rawPath);
+            if (!Directory.Exists(expanded)) continue;
+
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(expanded, "*", SearchOption.TopDirectoryOnly))
+                {
+                    try { File.Delete(file); deleted++; }
+                    catch { skipped++; }
+                }
+                foreach (var dir in Directory.EnumerateDirectories(expanded))
+                {
+                    try { Directory.Delete(dir, recursive: true); deleted++; }
+                    catch { skipped++; }
+                }
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{expanded}: {ex.Message}");
+            }
+        }
+
+        var summary = $"Cache cleared: {deleted} item(s) removed, {skipped} locked/skipped.";
+        if (errors.Count > 0) summary += $" Errors: {string.Join("; ", errors)}";
+        return (true, summary);
+    }
+
+    private async Task<(bool, string)> ExecuteRestartServiceAsync(string? payload, CancellationToken ct)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return (false, "Service restart not supported on non-Windows");
+
+        string? serviceName = null;
+        if (!string.IsNullOrWhiteSpace(payload))
+        {
+            try
+            {
+                var opts = JsonSerializer.Deserialize<Dictionary<string, string>>(payload,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                opts?.TryGetValue("serviceName", out serviceName);
+            }
+            catch { }
+        }
+
+        if (string.IsNullOrWhiteSpace(serviceName))
+            return (false, "payload.serviceName is required");
+
+        var allowed = _configuration.GetSection("Commands:AllowedServices").Get<string[]>() ?? Array.Empty<string>();
+        if (!allowed.Any(a => string.Equals(a, serviceName, StringComparison.OrdinalIgnoreCase)))
+            return (false, $"Service '{serviceName}' is not in the AllowedServices list");
+
+        var timeout = _configuration.GetValue("Commands:CommandTimeoutSeconds", 60);
+
+#pragma warning disable CA1416
+        try
+        {
+            using var svc = new System.ServiceProcess.ServiceController(serviceName);
+
+            if (svc.Status != System.ServiceProcess.ServiceControllerStatus.Stopped)
+            {
+                svc.Stop();
+                svc.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Stopped,
+                    TimeSpan.FromSeconds(timeout / 2));
+            }
+
+            svc.Start();
+            svc.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running,
+                TimeSpan.FromSeconds(timeout / 2));
+
+            return (true, $"Service '{serviceName}' restarted successfully (status: {svc.Status})");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Service '{serviceName}' restart failed: {ex.Message}");
+        }
+#pragma warning restore CA1416
+    }
+
+    private async Task<(bool, string)> ExecuteRestartBrowserAsync(string? payload, CancellationToken ct)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return (false, "Browser restart not supported on non-Windows");
+
+        var allowedProcesses = _configuration.GetSection("Commands:AllowedBrowserProcesses").Get<string[]>()
+            ?? new[] { "chrome", "msedge", "firefox" };
+
+        string[]? targets = null;
+        if (!string.IsNullOrWhiteSpace(payload))
+        {
+            try
+            {
+                var opts = JsonSerializer.Deserialize<Dictionary<string, string>>(payload,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (opts?.TryGetValue("processName", out var pn) == true && !string.IsNullOrWhiteSpace(pn))
+                    targets = new[] { pn };
+            }
+            catch { }
+        }
+
+        targets ??= allowedProcesses;
+
+        var killed = 0;
+        var denied = new List<string>();
+
+        foreach (var target in targets)
+        {
+            if (!allowedProcesses.Any(a => string.Equals(a, target, StringComparison.OrdinalIgnoreCase)))
+            {
+                denied.Add(target);
+                continue;
+            }
+
+            try
+            {
+                var procs = System.Diagnostics.Process.GetProcessesByName(target);
+                foreach (var p in procs)
+                {
+                    try { p.Kill(entireProcessTree: true); killed++; }
+                    catch { }
+                    finally { p.Dispose(); }
+                }
+            }
+            catch { }
+        }
+
+        if (denied.Count > 0)
+            return (false, $"Process(es) not in AllowedBrowserProcesses: {string.Join(", ", denied)}");
+
+        // Optionally restart if BrowserRestartPath is configured
+        var restartPath = _configuration["Commands:BrowserRestartPath"];
+        var restarted = false;
+        if (!string.IsNullOrWhiteSpace(restartPath) && File.Exists(restartPath))
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = restartPath,
+                    UseShellExecute = true
+                });
+                restarted = true;
+            }
+            catch { }
+        }
+
+        return (true, $"Browser processes killed: {killed}. {(restarted ? "Browser restarted." : "No restart path configured.")}");
+    }
+
+    private async Task<(bool, string)> ExecuteGpUpdateAsync(CancellationToken ct)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return (false, "gpupdate not supported on non-Windows");
+
+        var timeout = _configuration.GetValue("Commands:CommandTimeoutSeconds", 60);
+        var (exit, stdout, stderr) = await RunProcessAsync("gpupdate", "/force /wait:0", timeout, ct);
+        var output = TruncateOutput((stdout + "\n" + stderr).Trim());
+        return (exit == 0, $"gpupdate /force: {(exit == 0 ? "succeeded" : $"exit {exit}")}. {output}");
+    }
+
+    private async Task<(bool, string)> ExecuteRebootAsync(
+        string? payload, string backendBaseUrl, Guid commandId, string logsUrl, CancellationToken ct)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return (false, "Reboot not supported on non-Windows");
+
+        var defaultDelay = _configuration.GetValue("Commands:RebootDelaySeconds", 30);
+        var delay = defaultDelay;
+        if (!string.IsNullOrWhiteSpace(payload))
+        {
+            try
+            {
+                var opts = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payload,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (opts?.TryGetValue("delaySeconds", out var ds) == true && ds.TryGetInt32(out var d))
+                    delay = Math.Max(5, d);
+            }
+            catch { }
+        }
+
+        // Complete the command before the machine goes down
+        await CompleteCommandAsync(backendBaseUrl, commandId, true, logsUrl, CancellationToken.None);
+        await SendLogAsync(logsUrl, "Warning", $"REBOOT initiated with {delay}s delay on {Environment.MachineName}", CancellationToken.None);
+
+        var (exit, _, stderr) = await RunProcessAsync("shutdown", $"/r /t {delay} /c \"KioskAgent reboot command\"", 10, ct);
+        if (exit != 0)
+            return (false, $"shutdown /r failed (exit {exit}): {stderr.Trim()}");
+
+        // Return special sentinel; HandleCommandAsync checks shouldRestart to avoid double-complete
+        return (true, $"Reboot scheduled in {delay}s");
+    }
+
+    // ── Process runner ────────────────────────────────────────────────────────
+
+    private static async Task<(int exitCode, string stdout, string stderr)> RunProcessAsync(
+        string fileName, string arguments, int timeoutSeconds, CancellationToken ct)
+    {
+        using var proc = new System.Diagnostics.Process();
+        proc.StartInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        proc.Start();
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        string stdout, stderr;
+        try
+        {
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync(cts.Token);
+            var stderrTask = proc.StandardError.ReadToEndAsync(cts.Token);
+            await proc.WaitForExitAsync(cts.Token);
+            stdout = await stdoutTask;
+            stderr = await stderrTask;
+        }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { }
+            return (-1, string.Empty, $"Process timed out after {timeoutSeconds}s");
+        }
+
+        return (proc.ExitCode, stdout, stderr);
+    }
+
+    private static string TruncateOutput(string s, int max = 300) =>
+        s.Length <= max ? s : s[..max] + "…";
 
     // ── System Info ──────────────────────────────────────────────────────────
 

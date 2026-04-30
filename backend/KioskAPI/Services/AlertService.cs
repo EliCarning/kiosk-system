@@ -8,11 +8,13 @@ public class AlertService : IAlertService
 {
     private readonly AppDbContext _db;
     private readonly IRealtimeNotifier _realtime;
+    private readonly IAlertDeliveryService _delivery;
 
-    public AlertService(AppDbContext db, IRealtimeNotifier realtime)
+    public AlertService(AppDbContext db, IRealtimeNotifier realtime, IAlertDeliveryService delivery)
     {
         _db = db;
         _realtime = realtime;
+        _delivery = delivery;
     }
 
     public async Task<IEnumerable<Alert>> GetActiveAsync(CancellationToken ct = default)
@@ -79,6 +81,10 @@ public class AlertService : IAlertService
         _db.Alerts.Add(alert);
         await _db.SaveChangesAsync(ct);
         await _realtime.AlertCreatedAsync(alert, ct);
+
+        // Fire-and-forget delivery — never await, never throw into caller
+        _ = Task.Run(() => _delivery.SendAsync(alert, CancellationToken.None), CancellationToken.None);
+
         return alert;
     }
 }

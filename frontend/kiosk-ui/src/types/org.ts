@@ -23,8 +23,8 @@ export interface Kiosk {
   ipAddress: string;
   status: MachineStatus;
   lastSeen: string | null;
-  siteId: string;
-  departmentId: string;
+  siteId: string | null;
+  departmentId: string | null;
   checks: KioskCheck[];
   history: KioskHistoryPoint[];
   browser: {

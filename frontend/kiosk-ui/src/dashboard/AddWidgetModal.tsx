@@ -7,9 +7,10 @@ interface Props {
   existing: Set<WidgetType>;
   onAdd: (type: WidgetType) => void;
   onClose: () => void;
+  allowDuplicates?: boolean;
 }
 
-const AddWidgetModal: React.FC<Props> = ({ open, existing, onAdd, onClose }) => {
+const AddWidgetModal: React.FC<Props> = ({ open, existing, onAdd, onClose, allowDuplicates = false }) => {
   if (!open) return null;
 
   return (
@@ -23,12 +24,13 @@ const AddWidgetModal: React.FC<Props> = ({ open, existing, onAdd, onClose }) => 
           {WIDGET_ORDER.map((type) => {
             const meta = WIDGET_REGISTRY[type];
             const added = existing.has(type);
+            const blocked = added && !allowDuplicates;
             return (
               <button
                 key={type}
                 className={`add-widget-card${added ? " add-widget-card--added" : ""}`}
-                onClick={() => { if (!added) { onAdd(type); onClose(); } }}
-                disabled={added}
+                onClick={() => { if (!blocked) { onAdd(type); onClose(); } }}
+                disabled={blocked}
               >
                 <div className="add-widget-card__label">{meta.label}</div>
                 <div className="add-widget-card__desc">{meta.description}</div>
