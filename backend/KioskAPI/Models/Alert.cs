@@ -12,7 +12,9 @@ public class Alert
     public string MachineName { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+    public string FailureReason { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool IsResolved { get; set; }
     public DateTime? ResolvedAt { get; set; }
+    public DateTime? NotificationSentAt { get; set; }
 }

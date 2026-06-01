@@ -3,6 +3,7 @@ using System;
 using KioskAPI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace KioskAPI.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260517071136_FixDashboardWindowsFeatureMigration")]
+    partial class FixDashboardWindowsFeatureMigration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.6");
@@ -69,11 +72,6 @@ namespace KioskAPI.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("FailureReason")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
                     b.Property<bool>("IsResolved")
                         .HasColumnType("INTEGER");
 
@@ -84,9 +82,6 @@ namespace KioskAPI.Migrations
 
                     b.Property<string>("Message")
                         .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("NotificationSentAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("ResolvedAt")
@@ -102,8 +97,6 @@ namespace KioskAPI.Migrations
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("MachineName", "Type", "IsResolved");
-
-                    b.HasIndex("NotificationSentAt");
 
                     b.ToTable("Alerts");
                 });

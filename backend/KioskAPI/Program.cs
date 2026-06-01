@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -35,6 +36,7 @@ builder.Services.AddHttpClient("alert-delivery");
 builder.Services.AddSingleton<IAlertDeliveryService, AlertDeliveryService>();
 builder.Services.AddScoped<IMachineService, MachineService>();
 builder.Services.AddScoped<ILogService, LogService>();
+builder.Services.AddSingleton<ICommandSafetyValidator, CommandSafetyValidator>();
 builder.Services.AddScoped<ICommandService, CommandService>();
 builder.Services.AddScoped<IAlertService, AlertService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
@@ -47,14 +49,26 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowFrontend", policy =>
+    options.AddPolicy("dev", policy =>
     {
-        policy.WithOrigins(
-                  "http://localhost:3000",
-                  "http://127.0.0.1:3000")
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
+        var configuredOrigins = builder.Configuration
+            .GetSection("Cors:AllowedOrigins")
+            .Get<string[]>()
+            ?? Array.Empty<string>();
+        var origins = configuredOrigins.Length > 0
+            ? configuredOrigins
+            : new[]
+            {
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3001"
+            };
+
+        policy
+            .WithOrigins(origins)
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
@@ -101,8 +115,9 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+if (app.Configuration.GetValue("Database:ApplyMigrationsOnStartup", true))
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 }
@@ -113,15 +128,65 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseCors("AllowFrontend");
+app.UseCors("dev");
 
-app.MapHealthChecks("/health").AllowAnonymous();
+app.MapGet("/health", async (AppDbContext db, CancellationToken ct) =>
+{
+    var connected = false;
+    try
+    {
+        connected = await db.Database.CanConnectAsync(ct);
+    }
+    catch
+    {
+        connected = false;
+    }
+
+    return Results.Json(new
+    {
+        status = connected ? "Healthy" : "Unhealthy",
+        database = connected ? "Connected" : "Disconnected",
+        timestamp = DateTimeOffset.UtcNow
+    }, statusCode: connected ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
+}).AllowAnonymous();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 const string AgentKeyHeader = "X-Agent-Key";
 var expectedAgentKey = app.Configuration["Agent:ApiKey"];
+
+app.MapGet("/api/version", (IHostEnvironment env, IConfiguration config) =>
+{
+    var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0";
+    return Results.Ok(new
+    {
+        appVersion = config["Version:AppVersion"] ?? assemblyVersion,
+        buildDate = config["Version:BuildDate"] ?? "",
+        environment = env.EnvironmentName
+    });
+}).AllowAnonymous();
+
+app.MapGet("/api/settings/notifications", (IConfiguration config) =>
+{
+    var recipients = config.GetSection("EmailNotifications:Recipients").Get<string[]>()
+                     ?? Array.Empty<string>();
+    var smtpHost = config["EmailNotifications:SmtpHost"] ?? "";
+    var fromAddress = config["EmailNotifications:FromAddress"] ?? "";
+
+    return Results.Ok(new
+    {
+        emailNotificationsEnabled = config.GetValue("EmailNotifications:EnableEmailNotifications", false),
+        smtpConfigured = !string.IsNullOrWhiteSpace(smtpHost)
+                         && !string.IsNullOrWhiteSpace(fromAddress)
+                         && recipients.Any(r => !string.IsNullOrWhiteSpace(r)),
+        smtpHost = string.IsNullOrWhiteSpace(smtpHost) ? "" : smtpHost,
+        smtpPort = config.GetValue("EmailNotifications:SmtpPort", 25),
+        fromAddress,
+        recipients = recipients.Where(r => !string.IsNullOrWhiteSpace(r)).ToArray(),
+        offlineThresholdMinutes = (int)MachineService.OfflineAlertThreshold.TotalMinutes
+    });
+}).RequireAuthorization(KioskPolicies.RequireViewer);
 
 IResult? RequireAgentKey(HttpContext ctx)
 {
@@ -216,7 +281,11 @@ app.MapGet("/api/kiosks/{machineName}/logs",
         Results.Ok(await service.GetByMachineAsync(machineName, ct)))
     .RequireAuthorization(KioskPolicies.RequireViewer);
 
-app.MapPost("/api/commands", async (CreateCommandRequest request, ICommandService service, HttpContext ctx) =>
+app.MapPost("/api/commands", async (
+    CreateCommandRequest request,
+    ICommandService service,
+    ICommandSafetyValidator commandSafety,
+    HttpContext ctx) =>
 {
     if (string.IsNullOrWhiteSpace(request.MachineName))
         return Results.BadRequest("machineName is required");
@@ -224,12 +293,19 @@ app.MapPost("/api/commands", async (CreateCommandRequest request, ICommandServic
     if (string.IsNullOrWhiteSpace(request.Type))
         return Results.BadRequest("type is required");
 
+    var validation = commandSafety.Validate(request.Type, request.Payload);
+    if (!validation.IsValid)
+        return Results.BadRequest(validation.Error);
+
     var userInfo = CurrentUser.From(ctx.User);
     var displayName = string.IsNullOrWhiteSpace(userInfo.Domain)
         ? userInfo.Username
         : $"{userInfo.Domain}\\{userInfo.Username}";
     var ip = ctx.Connection.RemoteIpAddress?.ToString();
     var issuer = new CommandIssuer(userInfo.Username, displayName, ip);
+
+    request.Type = validation.NormalizedType;
+    request.Payload = validation.NormalizedPayload;
 
     var command = await service.EnqueueAsync(request, issuer);
     return Results.Created($"/api/commands/{command.Id}", command);
@@ -267,7 +343,8 @@ app.MapPost("/api/commands/{id:guid}/complete",
         var denied = RequireAgentKey(ctx);
         if (denied is not null) return denied;
 
-        var success = request?.Success ?? true;
+        var success = string.Equals(request?.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            || (request?.Status is null && (request?.Success ?? true));
         var command = await service.CompleteAsync(id, success);
         return command is null ? Results.NotFound() : Results.Ok(command);
     }).AllowAnonymous();

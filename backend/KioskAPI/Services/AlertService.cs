@@ -52,6 +52,7 @@ public class AlertService : IAlertService
         string machineName,
         string type,
         string message,
+        string? failureReason = null,
         bool dedupeActive = true,
         CancellationToken ct = default)
     {
@@ -73,18 +74,44 @@ public class AlertService : IAlertService
             MachineName = machineName,
             Type = type,
             Message = message,
+            FailureReason = string.IsNullOrWhiteSpace(failureReason)
+                ? InferFailureReason(type, message)
+                : failureReason.Trim(),
             CreatedAt = DateTime.UtcNow,
             IsResolved = false,
-            ResolvedAt = null
+            ResolvedAt = null,
+            NotificationSentAt = null
         };
 
         _db.Alerts.Add(alert);
         await _db.SaveChangesAsync(ct);
         await _realtime.AlertCreatedAsync(alert, ct);
 
-        // Fire-and-forget delivery — never await, never throw into caller
-        _ = Task.Run(() => _delivery.SendAsync(alert, CancellationToken.None), CancellationToken.None);
+        var sent = await _delivery.SendAsync(alert, ct);
+        if (sent)
+        {
+            alert.NotificationSentAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
 
         return alert;
+    }
+
+    private static string InferFailureReason(string type, string message)
+    {
+        if (string.Equals(type, AlertTypes.Offline, StringComparison.OrdinalIgnoreCase))
+        {
+            return "No heartbeat received";
+        }
+
+        if (string.Equals(type, AlertTypes.CommandFailed, StringComparison.OrdinalIgnoreCase))
+        {
+            return message.Contains("browser", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("service", StringComparison.OrdinalIgnoreCase)
+                ? "Browser/service command failed"
+                : "Last command failed";
+        }
+
+        return "Unknown";
     }
 }

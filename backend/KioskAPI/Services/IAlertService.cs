@@ -11,6 +11,7 @@ public interface IAlertService
         string machineName,
         string type,
         string message,
+        string? failureReason = null,
         bool dedupeActive = true,
         CancellationToken ct = default);
 }

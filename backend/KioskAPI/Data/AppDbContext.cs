@@ -87,8 +87,10 @@ public class AppDbContext : DbContext
             entity.Property(a => a.MachineName).IsRequired().HasMaxLength(200);
             entity.Property(a => a.Type).IsRequired().HasMaxLength(64);
             entity.Property(a => a.Message).IsRequired();
+            entity.Property(a => a.FailureReason).HasMaxLength(256);
             entity.HasIndex(a => new { a.MachineName, a.Type, a.IsResolved });
             entity.HasIndex(a => a.CreatedAt);
+            entity.HasIndex(a => a.NotificationSentAt);
         });
 
         modelBuilder.Entity<SystemInfo>(entity =>

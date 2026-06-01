@@ -9,22 +9,37 @@ public class CommandService : ICommandService
     private readonly AppDbContext _db;
     private readonly IAlertService _alerts;
     private readonly IRealtimeNotifier _realtime;
+    private readonly ICommandSafetyValidator _commandSafety;
+    private readonly ILogger<CommandService> _logger;
 
-    public CommandService(AppDbContext db, IAlertService alerts, IRealtimeNotifier realtime)
+    public CommandService(
+        AppDbContext db,
+        IAlertService alerts,
+        IRealtimeNotifier realtime,
+        ICommandSafetyValidator commandSafety,
+        ILogger<CommandService> logger)
     {
         _db = db;
         _alerts = alerts;
         _realtime = realtime;
+        _commandSafety = commandSafety;
+        _logger = logger;
     }
 
     public async Task<Command> EnqueueAsync(CreateCommandRequest request, CommandIssuer? issuer = null, CancellationToken ct = default)
     {
+        var validation = _commandSafety.Validate(request.Type, request.Payload);
+        if (!validation.IsValid)
+        {
+            throw new ArgumentException(validation.Error, nameof(request));
+        }
+
         var command = new Command
         {
             Id = Guid.NewGuid(),
-            MachineName = request.MachineName,
-            Type = request.Type,
-            Payload = request.Payload,
+            MachineName = request.MachineName.Trim(),
+            Type = validation.NormalizedType,
+            Payload = validation.NormalizedPayload,
             Status = CommandStatuses.Pending,
             CreatedAt = DateTime.UtcNow,
             CompletedAt = null,
@@ -35,6 +50,9 @@ public class CommandService : ICommandService
 
         _db.Commands.Add(command);
         await _db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Command queued: type={Type}, kiosk={Kiosk}, timestamp={Timestamp:o}, result={Result}",
+            command.Type, command.MachineName, command.CreatedAt, command.Status);
         await _realtime.CommandUpdatedAsync(command, ct);
         return command;
     }
@@ -86,6 +104,9 @@ public class CommandService : ICommandService
         command.Status = success ? CommandStatuses.Completed : CommandStatuses.Failed;
         command.CompletedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Command completed: type={Type}, kiosk={Kiosk}, timestamp={Timestamp:o}, result={Result}",
+            command.Type, command.MachineName, command.CompletedAt, command.Status);
         await _realtime.CommandUpdatedAsync(command, ct);
 
         if (!success)
